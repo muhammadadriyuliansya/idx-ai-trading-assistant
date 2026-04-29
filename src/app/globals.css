@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: #050507;
+  --color-foreground: #ededed;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  background:
+    radial-gradient(circle at 12% 10%, rgba(37, 99, 235, 0.08), transparent 45%),
+    radial-gradient(circle at 88% 90%, rgba(16, 185, 129, 0.06), transparent 45%),
+    #050507;
+  color: var(--color-foreground);
+  font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.35);
+  color: white;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f1f23;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a30;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Subtle grid background utility */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.glow-blue {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2),
+    0 20px 60px -20px rgba(59, 130, 246, 0.4);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2),
+    0 20px 60px -20px rgba(16, 185, 129, 0.35);
+}
+
+.glass {
+  background: linear-gradient(
+    180deg,
+    rgba(24, 24, 27, 0.72) 0%,
+    rgba(9, 9, 11, 0.72) 100%
+  );
+  backdrop-filter: blur(12px);
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.pulse-soft {
+  animation: pulse-soft 2.4s ease-in-out infinite;
+}
