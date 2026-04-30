@@ -115,6 +115,24 @@ export interface RiskCalcResult {
   positionValue: number;
 }
 
+export interface QuoteResult {
+  ticker: string;
+  fetchedAt: number;
+  scanner: Partial<ScannerInput>;
+  risk: Partial<RiskInput>;
+  meta: {
+    barsCount: number;
+    lastBarDate: string;
+    trend: "bullish" | "sideways" | "bearish";
+    macdLabel: string;
+    stochLabel: string;
+    ihsgTrend: "bullish" | "sideways" | "bearish" | "unknown";
+    ihsgChange1d?: number;
+    ihsgChange5d?: number;
+    volRatio: number;
+  };
+}
+
 export interface SetupScoreBreakdown {
   trend: number;
   momentum: number;

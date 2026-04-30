@@ -6,10 +6,13 @@ import {
   Activity,
   Check,
   Copy,
+  Loader2,
+  RefreshCw,
   Save,
   Sparkles,
   TrendingDown,
   TrendingUp,
+  Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +59,84 @@ export function FieldRow({ field, value, onChange }: FieldRowProps) {
       />
       {field.hint && (
         <span className="text-[10px] text-zinc-500">{field.hint}</span>
+      )}
+    </div>
+  );
+}
+
+export interface AutoFetchBarProps {
+  ticker: string;
+  onTickerChange: (value: string) => void;
+  loading: boolean;
+  error: string | null;
+  meta: string | null;
+  onFetch: (ticker: string) => void;
+  hint?: string;
+}
+
+export function AutoFetchBar({
+  ticker,
+  onTickerChange,
+  loading,
+  error,
+  meta,
+  onFetch,
+  hint = "Yahoo Finance · IDX (.JK)",
+}: AutoFetchBarProps) {
+  const submit = () => {
+    const trimmed = ticker.trim().toUpperCase();
+    if (!trimmed) return;
+    onFetch(trimmed);
+  };
+  return (
+    <div className="rounded-2xl border border-blue-500/15 bg-blue-500/5 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-blue-300">
+          <Zap className="h-3 w-3" /> Auto Fetch
+        </div>
+        <span className="text-[10px] text-zinc-500">{hint}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          value={ticker}
+          onChange={(e) => onTickerChange(e.target.value.toUpperCase())}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder="BBRI"
+          autoComplete="off"
+          spellCheck={false}
+          className="h-9 uppercase"
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="accent"
+          onClick={submit}
+          disabled={loading || !ticker.trim()}
+          className="shrink-0"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Fetching
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-3.5 w-3.5" /> Fetch
+            </>
+          )}
+        </Button>
+      </div>
+      {meta && !error && (
+        <div className="mt-2 text-[10px] leading-snug text-zinc-400">{meta}</div>
+      )}
+      {error && (
+        <div className="mt-2 text-[10px] leading-snug text-red-300">
+          {error}
+        </div>
       )}
     </div>
   );

@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
   AIOutputPanel,
+  AutoFetchBar,
   ConfidenceBadge,
   type FieldDef,
   InputGrid,
@@ -27,6 +28,7 @@ import {
   SetupScoreBar,
   StatusBadge,
 } from "@/components/shared";
+import { describeQuoteMeta, useQuoteFetch } from "@/lib/quote";
 import { generateAnalysis } from "@/lib/ai";
 import {
   calculateRiskReward,
@@ -428,9 +430,16 @@ export function ScannerModule({ settings }: BaseModuleProps) {
     SCANNER_DEFAULTS,
   );
   const [prompt, setPrompt, resetPrompt] = usePrompt("scanner");
+  const quote = useQuoteFetch();
 
   const setField = (key: keyof ScannerInput, value: string) =>
     setInput((prev) => ({ ...prev, [key]: value }));
+
+  const handleAutoFetch = async (ticker: string) => {
+    const data = await quote.fetchQuote(ticker);
+    if (!data) return;
+    setInput((prev) => ({ ...prev, ...data.scanner }));
+  };
 
   const support = toNumber(input.support);
   const resistance = toNumber(input.resistance);
@@ -457,11 +466,22 @@ export function ScannerModule({ settings }: BaseModuleProps) {
       leftDescription="Input data teknikal — AI klasifikasi setup, volume read, dan warning."
       leftIcon={<Telescope className="h-4 w-4" />}
       inputs={
-        <InputGrid
-          fields={SCANNER_FIELDS}
-          values={input as unknown as Record<string, string>}
-          onChange={(k, v) => setField(k as keyof ScannerInput, v)}
-        />
+        <div className="space-y-4">
+          <AutoFetchBar
+            ticker={input.ticker}
+            onTickerChange={(v) => setField("ticker", v)}
+            loading={quote.loading}
+            error={quote.error}
+            meta={quote.data ? describeQuoteMeta(quote.data) : null}
+            onFetch={handleAutoFetch}
+            hint="Yahoo Finance · IDX (.JK) · numeric fields"
+          />
+          <InputGrid
+            fields={SCANNER_FIELDS}
+            values={input as unknown as Record<string, string>}
+            onChange={(k, v) => setField(k as keyof ScannerInput, v)}
+          />
+        </div>
       }
       rightPanel={
         <Card>
@@ -535,9 +555,16 @@ export function RiskModule({ settings }: BaseModuleProps) {
     RISK_DEFAULTS,
   );
   const [prompt, setPrompt, resetPrompt] = usePrompt("risk");
+  const quote = useQuoteFetch();
 
   const setField = (key: keyof RiskInput, value: string) =>
     setInput((prev) => ({ ...prev, [key]: value }));
+
+  const handleAutoFetch = async (ticker: string) => {
+    const data = await quote.fetchQuote(ticker);
+    if (!data) return;
+    setInput((prev) => ({ ...prev, ...data.risk }));
+  };
 
   const calc = useMemo(() => computeRisk(input), [input]);
 
@@ -555,11 +582,22 @@ export function RiskModule({ settings }: BaseModuleProps) {
       leftDescription="Hitung entry, stop, target, lot, dan max loss. AI validasi & adjust kalau perlu."
       leftIcon={<Calculator className="h-4 w-4" />}
       inputs={
-        <InputGrid
-          fields={RISK_FIELDS}
-          values={input as unknown as Record<string, string>}
-          onChange={(k, v) => setField(k as keyof RiskInput, v)}
-        />
+        <div className="space-y-4">
+          <AutoFetchBar
+            ticker={input.ticker}
+            onTickerChange={(v) => setField("ticker", v)}
+            loading={quote.loading}
+            error={quote.error}
+            meta={quote.data ? describeQuoteMeta(quote.data) : null}
+            onFetch={handleAutoFetch}
+            hint="Yahoo Finance · auto support / resistance / ATR"
+          />
+          <InputGrid
+            fields={RISK_FIELDS}
+            values={input as unknown as Record<string, string>}
+            onChange={(k, v) => setField(k as keyof RiskInput, v)}
+          />
+        </div>
       }
       rightPanel={
         <Card>

@@ -15,6 +15,27 @@ Semi-manual AI trading assistant untuk **swing trade & daytrade saham IDX**.
 | **Decision Engine**  | Final verdict: BUY NOW / WAIT / WATCHLIST / REJECT.                   |
 | **Trade Journal**    | Evaluasi post-trade: execution, FOMO, discipline, lessons learned.   |
 
+## Auto Fetch (Market Scanner & Risk)
+
+Tinggal ketik ticker IDX (mis. `BBRI`, `TLKM`, `GOTO`) lalu klik **Fetch** —
+aplikasi tarik ~250 bar harian dari Yahoo Finance untuk `<TICKER>.JK`,
+hitung indikator lokal, lalu auto-isi form Scanner + Risk:
+
+- OHLC, current price, prev close, today volume
+- Avg volume 20D & vol-vs-avg ratio
+- EMA20 / EMA50 / EMA200, VWAP rolling 5D
+- RSI(14), MACD label (cross / above / below signal), Stochastic K/D
+- Swing-pivot Support & Resistance (lookback 80, window 3)
+- ATR(14) untuk Risk module
+- IHSG context (`^JKSE`) → trend label + 5D % change
+
+Field yang **tetap manual** karena Yahoo nggak punya datanya:
+**Foreign Flow**, **Broker Accumulation**, **Sector Strength**.
+
+Endpoint: `GET /api/quote?ticker=BBRI` (bisa dipanggil terpisah juga).
+Catatan: Yahoo Finance kadang rate-limit IP datacenter (Vercel, dll).
+Untuk pemakaian harian, run lokal di mesin sendiri.
+
 ## Stack
 
 - **Next.js 16** (App Router) + **TypeScript**
