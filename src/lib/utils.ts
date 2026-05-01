@@ -24,7 +24,10 @@ export function formatCurrency(value: number): string {
 
 export function formatPercent(value: number, fractionDigits = 2): string {
   if (!Number.isFinite(value)) return "—";
-  return `${value.toFixed(fractionDigits)}%`;
+  return `${value.toLocaleString("id-ID", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })}%`;
 }
 
 export function toNumber(value: unknown): number {

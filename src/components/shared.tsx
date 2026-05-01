@@ -228,7 +228,7 @@ export function RRIndicator({ rr, label = "Risk : Reward" }: RRIndicatorProps) {
         </div>
         <div className="mt-1 flex items-baseline gap-2">
           <span className="text-2xl font-semibold tabular-nums">
-            {Number.isFinite(rr) ? `1 : ${rr.toFixed(2)}` : "—"}
+            {Number.isFinite(rr) ? `1 : ${rr.toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
           </span>
         </div>
       </div>
