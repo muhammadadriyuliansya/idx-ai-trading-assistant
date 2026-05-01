@@ -7,8 +7,7 @@ import type { ScanCandidate, ScanOptions, MarketData, IndicatorSet } from './typ
 import { applyHardFilters, DEFAULT_FILTERS } from './filters'
 import { calculateSetupScore } from '@/lib/calc'
 import { calculateRiskReward } from '@/lib/calc'
-import { fetchMarketData } from './orchestrator'
-import { calculateIndicators } from './orchestrator'
+import { fetchMarketDataWithIndicators } from './orchestrator'
 
 /**
  * Run automated market scan on multiple tickers
@@ -35,7 +34,7 @@ export async function runMarketScan(
     const batchResults = await Promise.allSettled(
       batch.map(async (ticker) => {
         try {
-          return await scanTicker(ticker, minVolumeRatio, minRR)
+          return await scanTicker(ticker, minVolumeRatio ?? DEFAULT_FILTERS.minVolumeRatio!, minRR ?? DEFAULT_FILTERS.minRR!)
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unknown error'
           errors.set(ticker, message)
@@ -78,11 +77,8 @@ async function scanTicker(
   minVolumeRatio: number,
   minRR: number
 ): Promise<ScanCandidate | null> {
-  // Fetch market data
-  const marketData = await fetchMarketData(ticker)
-
-  // Calculate indicators
-  const indicators = calculateIndicators(marketData)
+  // Fetch market data and indicators
+  const { marketData, indicators } = await fetchMarketDataWithIndicators(ticker)
 
   // Apply hard filters
   const filterResult = applyHardFilters(

@@ -114,6 +114,8 @@ export interface DecisionResult {
   bearishScenario: string
   executionNotes: string
   reasoning: string
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  urgency: 'immediate' | 'soon' | 'monitor'
 }
 
 // ============================================================================

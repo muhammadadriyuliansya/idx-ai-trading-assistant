@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Code2, Search, Settings, Sparkles } from "lucide-react";
+import { Activity, Code2, Search, Settings, Sparkles, TrendingUp, Radar } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
@@ -12,13 +12,15 @@ import { DEFAULT_SETTINGS } from "@/lib/ai";
 import { STORAGE_KEYS, useLocalStorage } from "@/lib/storage";
 import type { AISettings, ModuleKey } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { PipelineModule } from "@/components/pipeline-module";
+import { MarketScanner } from "@/components/market-scanner";
 
 export function AppShell() {
   const [settings, setSettings] = useLocalStorage<AISettings>(
     STORAGE_KEYS.settings,
     DEFAULT_SETTINGS,
   );
-  const [active, setActive] = useState<ModuleKey>("scanner");
+  const [active, setActive] = useState<ModuleKey | "pipeline" | "scanner">("pipeline");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -27,7 +29,17 @@ export function AppShell() {
     setMounted(true);
   }, []);
 
-  const activeMeta = MODULE_META[active];
+  const activeMeta = active === "pipeline" ? {
+    label: "Full Pipeline",
+    description: "End-to-end analysis",
+    icon: <TrendingUp className="h-4 w-4" />,
+    render: () => <PipelineModule />,
+  } : active === "scanner" ? {
+    label: "Market Scanner",
+    description: "Multi-ticker scan",
+    icon: <Radar className="h-4 w-4" />,
+    render: () => <MarketScanner />,
+  } : MODULE_META[active];
   const ActiveModule = activeMeta.render;
 
   const hasKey = useMemo(() => {
@@ -59,7 +71,91 @@ export function AppShell() {
 
           <nav className="flex-1 space-y-1 p-3">
             <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
-              Modules
+              Pipeline
+            </div>
+            <button
+              type="button"
+              onClick={() => setActive("pipeline")}
+              className={cn(
+                "group relative flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all",
+                active === "pipeline"
+                  ? "bg-gradient-to-br from-blue-500/15 to-blue-500/5 ring-1 ring-blue-500/30"
+                  : "hover:bg-zinc-900/60",
+              )}
+            >
+              {active === "pipeline" && (
+                <motion.span
+                  layoutId="active-pill"
+                  className="absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-blue-400"
+                />
+              )}
+              <div
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+                  active === "pipeline"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-zinc-900/80 text-zinc-400 group-hover:text-zinc-200",
+                )}
+              >
+                <TrendingUp className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div
+                  className={cn(
+                    "text-sm font-medium",
+                    active === "pipeline" ? "text-zinc-50" : "text-zinc-200",
+                  )}
+                >
+                  Full Pipeline
+                </div>
+                <div className="truncate text-[10px] text-zinc-500">
+                  End-to-end analysis
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActive("scanner")}
+              className={cn(
+                "group relative flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all",
+                active === "scanner"
+                  ? "bg-gradient-to-br from-blue-500/15 to-blue-500/5 ring-1 ring-blue-500/30"
+                  : "hover:bg-zinc-900/60",
+              )}
+            >
+              {active === "scanner" && (
+                <motion.span
+                  layoutId="active-pill"
+                  className="absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-blue-400"
+                />
+              )}
+              <div
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+                  active === "scanner"
+                    ? "bg-blue-500/20 text-blue-300"
+                    : "bg-zinc-900/80 text-zinc-400 group-hover:text-zinc-200",
+                )}
+              >
+                <Radar className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div
+                  className={cn(
+                    "text-sm font-medium",
+                    active === "scanner" ? "text-zinc-50" : "text-zinc-200",
+                  )}
+                >
+                  Market Scanner
+                </div>
+                <div className="truncate text-[10px] text-zinc-500">
+                  Multi-ticker scan
+                </div>
+              </div>
+            </button>
+
+            <div className="px-2 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
+              Individual Modules
             </div>
             {MODULE_ORDER.map((key) => {
               const meta = MODULE_META[key];
@@ -191,6 +287,32 @@ export function AppShell() {
           {/* Mobile module tabs */}
           <div className="lg:hidden border-b border-zinc-900/80 bg-zinc-950/40 px-3 py-2">
             <div className="flex gap-2 overflow-x-auto scrollbar-none">
+              <button
+                type="button"
+                onClick={() => setActive("pipeline")}
+                className={cn(
+                  "flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 text-xs",
+                  active === "pipeline"
+                    ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
+                    : "border-zinc-800 bg-zinc-950/40 text-zinc-300",
+                )}
+              >
+                <TrendingUp className="h-3.5 w-3.5" />
+                Pipeline
+              </button>
+              <button
+                type="button"
+                onClick={() => setActive("scanner")}
+                className={cn(
+                  "flex shrink-0 items-center gap-2 rounded-xl border px-3 py-1.5 text-xs",
+                  active === "scanner"
+                    ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
+                    : "border-zinc-800 bg-zinc-950/40 text-zinc-300",
+                )}
+              >
+                <Radar className="h-3.5 w-3.5" />
+                Scanner
+              </button>
               {MODULE_ORDER.map((key) => {
                 const meta = MODULE_META[key];
                 const isActive = key === active;
@@ -259,10 +381,12 @@ export function AppShell() {
   );
 }
 
-function headline(key: ModuleKey): string {
+function headline(key: ModuleKey | "pipeline" | "scanner"): string {
   switch (key) {
+    case "pipeline":
+      return "One-click analysis from scanner to decision.";
     case "scanner":
-      return "Scan setup, score probabilitas, screen warning.";
+      return "Scan multiple tickers and rank by setup quality.";
     case "risk":
       return "Plan risk dulu, baru klik buy.";
     case "context":
@@ -274,10 +398,12 @@ function headline(key: ModuleKey): string {
   }
 }
 
-function sublineText(key: ModuleKey): string {
+function sublineText(key: ModuleKey | "pipeline" | "scanner"): string {
   switch (key) {
+    case "pipeline":
+      return "Run complete analysis pipeline automatically - fetch data, calculate indicators, run scanner, risk, context, and decision in one click. No AI required.";
     case "scanner":
-      return "Input data pre-market / intraday lu, sistem hitung skor heuristik real-time, AI kasih klasifikasi setup hedge-fund-grade.";
+      return "Automatically scan multiple tickers, apply hard filters, calculate setup scores, and rank opportunities by quality. All calculations done locally.";
     case "risk":
       return "Hitung entry, stop loss, dua TP, lot ideal, dan max loss otomatis. AI re-validate apakah setup layak di-take.";
     case "context":

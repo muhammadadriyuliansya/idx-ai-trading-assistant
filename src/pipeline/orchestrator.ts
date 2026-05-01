@@ -15,48 +15,41 @@ import type {
 } from './types'
 import type { AISettings } from '@/lib/types'
 import { applyHardFilters, DEFAULT_FILTERS } from './filters'
-import { calculateSetupScore } from '@/lib/calc'
-import { computeRisk } from '@/lib/calc'
-import { ema, rsi, macd, atr, vwap, rollingVwap, avgVolume, swingLevels, classifyTrend, describeMacd, describeStochastic } from '@/lib/indicators'
-import { Bar } from '@/lib/indicators'
-import { fetch as fetchQuote } from '@/lib/quote'
+import { calculateSetupScore, computeRisk, calculateRiskReward } from '@/lib/calc'
 
 /**
- * Run full analysis pipeline for a ticker
+ * Run full analysis pipeline for a ticker (AI optional)
  */
 export async function runFullAnalysis(
   ticker: string,
-  settings: AISettings
+  settings?: AISettings
 ): Promise<AnalysisPipeline> {
   try {
-    // 1. Fetch market data
-    const marketData = await fetchMarketData(ticker)
+    // 1. Fetch market data and indicators from API
+    const { marketData, indicators } = await fetchMarketDataWithIndicators(ticker)
 
-    // 2. Calculate indicators
-    const indicators = calculateIndicators(marketData)
-
-    // 3. Apply hard filters
+    // 2. Apply hard filters
     const filterResult = applyHardFilters(marketData, indicators)
     if (!filterResult.passed) {
-      return createRejectedPipeline(ticker, marketData, indicators, filterResult.reason)
+      return createRejectedPipeline(ticker, marketData, indicators, filterResult.reason || 'Failed hard filters')
     }
 
-    // 4. Run scanner agent
-    const scanner = await runScannerAgent(marketData, indicators, settings)
+    // 3. Run scanner agent (deterministic, no AI required)
+    const scanner = runScannerAgent(marketData, indicators)
 
-    // 5. Run risk agent
-    const risk = await runRiskAgent(marketData, indicators, scanner, settings)
+    // 4. Run risk agent (deterministic, no AI required)
+    const risk = runRiskAgent(marketData, indicators, scanner)
 
-    // 6. Run context agent
-    const context = await runContextAgent(marketData, indicators, settings)
+    // 5. Run context agent (deterministic, no AI required)
+    const context = runContextAgent(marketData, indicators)
 
-    // 7. Run debate agent
-    const debate = await runDebateAgent(scanner, risk, context, settings)
+    // 6. Run debate agent (deterministic, no AI required)
+    const debate = runDebateAgent(scanner, risk, context)
 
-    // 8. Run decision agent
-    const decision = await runDecisionAgent(scanner, risk, context, debate, settings)
+    // 7. Run decision agent (deterministic, no AI required)
+    const decision = runDecisionAgent(scanner, risk, context, debate)
 
-    // 9. Calculate final score
+    // 8. Calculate final score
     const finalScore = calculateFinalScore(scanner, risk, context, debate, decision)
 
     return {
@@ -80,86 +73,105 @@ export async function runFullAnalysis(
 }
 
 /**
- * Fetch market data for a ticker
+ * Fetch market data for a ticker from Yahoo Finance API
  */
 export async function fetchMarketData(ticker: string): Promise<MarketData> {
-  const quote = await fetchQuote(ticker)
+  const normalisedTicker = ticker.trim().toUpperCase()
+  const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
-  if (!quote || !quote.data) {
-    throw new Error(`Failed to fetch data for ${ticker}`)
+  const response = await fetch(`/api/quote?ticker=${encodeURIComponent(symbol)}`, {
+    cache: 'no-store',
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || `Failed to fetch data for ${ticker}`)
   }
 
-  const data = quote.data
-  const meta = quote.meta
+  const data = await response.json()
 
   return {
     ticker: data.ticker,
-    currentPrice: parseFloat(data.currentPrice),
-    open: parseFloat(data.open),
-    high: parseFloat(data.high),
-    low: parseFloat(data.low),
-    previousClose: parseFloat(data.previousClose),
-    todayVolume: parseFloat(data.todayVolume),
-    avgVolume20d: parseFloat(data.avgVolume20d),
-    support: parseFloat(data.support),
-    resistance: parseFloat(data.resistance),
-    atr: parseFloat(data.atr),
+    currentPrice: parseFloat(data.scanner.currentPrice),
+    open: parseFloat(data.scanner.open),
+    high: parseFloat(data.scanner.high),
+    low: parseFloat(data.scanner.low),
+    previousClose: parseFloat(data.scanner.previousClose),
+    todayVolume: parseFloat(data.scanner.todayVolume),
+    avgVolume20d: parseFloat(data.scanner.avgVolume20d),
+    support: parseFloat(data.scanner.support),
+    resistance: parseFloat(data.scanner.resistance),
+    atr: parseFloat(data.risk.atr),
     fetchedAt: Date.now(),
   }
 }
 
 /**
- * Calculate all technical indicators from market data
+ * Fetch market data with indicators from Yahoo Finance API
  */
-export function calculateIndicators(marketData: MarketData): IndicatorSet {
-  // For now, return simplified indicators
-  // In production, this would use actual OHLCV data
+export async function fetchMarketDataWithIndicators(
+  ticker: string
+): Promise<{ marketData: MarketData; indicators: IndicatorSet }> {
+  const normalisedTicker = ticker.trim().toUpperCase()
+  const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
-  const ema20 = marketData.currentPrice * 0.95 // Placeholder
-  const ema50 = marketData.currentPrice * 0.90 // Placeholder
-  const ema200 = marketData.currentPrice * 0.85 // Placeholder
-  const vwap = marketData.currentPrice * 0.98 // Placeholder
-  const rsi = 55 // Placeholder
-  const volumeRatio = marketData.todayVolume / marketData.avgVolume20d
+  const response = await fetch(`/api/quote?ticker=${encodeURIComponent(symbol)}`, {
+    cache: 'no-store',
+  })
 
-  // Determine trend
-  let trend: IndicatorSet['trend'] = 'sideways'
-  if (marketData.currentPrice > ema20 && ema20 > ema50) {
-    trend = 'bullish'
-  } else if (marketData.currentPrice < ema20 && ema20 < ema50) {
-    trend = 'bearish'
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error?.error || `Failed to fetch data for ${ticker}`)
   }
 
-  return {
-    ema20,
-    ema50,
-    ema200,
-    vwap,
-    rsi,
+  const data = await response.json()
+
+  const marketData: MarketData = {
+    ticker: data.ticker,
+    currentPrice: parseFloat(data.scanner.currentPrice),
+    open: parseFloat(data.scanner.open),
+    high: parseFloat(data.scanner.high),
+    low: parseFloat(data.scanner.low),
+    previousClose: parseFloat(data.scanner.previousClose),
+    todayVolume: parseFloat(data.scanner.todayVolume),
+    avgVolume20d: parseFloat(data.scanner.avgVolume20d),
+    support: parseFloat(data.scanner.support),
+    resistance: parseFloat(data.scanner.resistance),
+    atr: parseFloat(data.risk.atr),
+    fetchedAt: Date.now(),
+  }
+
+  const indicators: IndicatorSet = {
+    ema20: parseFloat(data.scanner.ema20),
+    ema50: parseFloat(data.scanner.ema50),
+    ema200: parseFloat(data.scanner.ema200),
+    vwap: parseFloat(data.scanner.vwap),
+    rsi: parseFloat(data.scanner.rsi),
     macd: {
-      macd: 0,
+      macd: 0, // Not provided by API, calculated from label
       signal: 0,
       histogram: 0,
-      label: 'netral',
+      label: data.scanner.macd || 'netral',
     },
     stochastic: {
-      k: 50,
+      k: 50, // Not provided by API, calculated from label
       d: 50,
-      label: 'neutral',
+      label: data.scanner.stochastic || 'neutral',
     },
-    trend,
-    volumeRatio,
+    trend: data.meta.trend,
+    volumeRatio: data.meta.volRatio,
   }
+
+  return { marketData, indicators }
 }
 
 /**
- * Run scanner agent
+ * Run scanner agent (deterministic, no AI required)
  */
-async function runScannerAgent(
+function runScannerAgent(
   marketData: MarketData,
-  indicators: IndicatorSet,
-  settings: AISettings
-): Promise<ScannerResult> {
+  indicators: IndicatorSet
+): ScannerResult {
   // Calculate setup score
   const setupScore = calculateSetupScore(
     {
@@ -203,32 +215,52 @@ async function runScannerAgent(
     setupType = 'reversal'
   }
 
+  // Generate warnings
+  const warnings: string[] = []
+  if (indicators.rsi > 80) warnings.push('RSI overbought (>80)')
+  if (indicators.rsi < 20) warnings.push('RSI oversold (<20)')
+  if (indicators.volumeRatio < 1) warnings.push('Volume below average')
+  if (indicators.macd.label.includes('bearish')) warnings.push('MACD bearish')
+
+  // Generate key reads
+  const keyReads: string[] = [
+    `Trend: ${indicators.trend}`,
+    `Volume: ${indicators.volumeRatio.toFixed(2)}x average`,
+    `RSI: ${indicators.rsi.toFixed(1)}`,
+    `Price vs EMA20: ${marketData.currentPrice > indicators.ema20 ? 'Above' : 'Below'}`,
+    `MACD: ${indicators.macd.label}`,
+  ]
+
+  // Generate action plan
+  let actionPlan = 'Monitor for confirmation'
+  if (setupType === 'breakout') {
+    actionPlan = 'Wait for pullback or volume confirmation'
+  } else if (setupType === 'pullback') {
+    actionPlan = 'Enter on pullback to support/EMA20'
+  } else if (setupType === 'reversal') {
+    actionPlan = 'Wait for trend reversal confirmation'
+  }
+
   return {
     setupType,
     setupScore: setupScore.total,
     confidence,
     status: setupScore.status,
-    keyReads: [
-      `Trend: ${indicators.trend}`,
-      `Volume: ${indicators.volumeRatio.toFixed(2)}x average`,
-      `RSI: ${indicators.rsi.toFixed(1)}`,
-      `Price vs EMA20: ${marketData.currentPrice > indicators.ema20 ? 'Above' : 'Below'}`,
-    ],
-    warnings: [],
-    actionPlan: 'Monitor for confirmation',
-    reasoning: `Setup score ${setupScore.total}/100 based on trend, momentum, and volume analysis.`,
+    keyReads,
+    warnings,
+    actionPlan,
+    reasoning: `Setup score ${setupScore.total}/100 based on trend (${setupScore.trend}/30), momentum (${setupScore.momentum}/20), volume (${setupScore.volume}/20), context (${setupScore.context}/20), and RR quality (${setupScore.rrQuality}/10).`,
   }
 }
 
 /**
- * Run risk agent
+ * Run risk agent (deterministic, no AI required)
  */
-async function runRiskAgent(
+function runRiskAgent(
   marketData: MarketData,
   indicators: IndicatorSet,
-  scanner: ScannerResult,
-  settings: AISettings
-): Promise<RiskResult> {
+  scanner: ScannerResult
+): RiskResult {
   // Calculate risk parameters
   const riskCalc = computeRisk({
     ticker: marketData.ticker,
@@ -252,6 +284,14 @@ async function runRiskAgent(
     verdict = 'ADJUST'
   }
 
+  // Generate reasoning
+  let reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} meets minimum requirements. Position sized for 1% risk.`
+  if (verdict === 'REJECT') {
+    reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} below minimum 2.0. Consider adjusting entry or waiting for better setup.`
+  } else if (verdict === 'ADJUST') {
+    reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} marginal. Consider reducing position size or waiting for better entry.`
+  }
+
   return {
     entryZone: `${riskCalc.entry.toFixed(0)} - ${(riskCalc.entry * 1.01).toFixed(0)}`,
     stopLoss: riskCalc.stopLoss.toFixed(0),
@@ -269,18 +309,17 @@ async function runRiskAgent(
       positionValue: riskCalc.positionValue,
     },
     verdict,
-    reasoning: `RR ${riskCalc.riskReward1.toFixed(2)} meets minimum requirements. Position sized for 1% risk.`,
+    reasoning,
   }
 }
 
 /**
- * Run context agent
+ * Run context agent (deterministic, no AI required)
  */
-async function runContextAgent(
+function runContextAgent(
   marketData: MarketData,
-  indicators: IndicatorSet,
-  settings: AISettings
-): Promise<ContextResult> {
+  indicators: IndicatorSet
+): ContextResult {
   // Simplified context analysis
   let marketRegime: ContextResult['marketRegime'] = 'NORMAL'
   let riskStance: ContextResult['riskStance'] = 'NEUTRAL'
@@ -293,30 +332,44 @@ async function runContextAgent(
     riskStance = 'RISK-OFF'
   }
 
+  // Generate key risks
+  const keyRisks: string[] = [
+    'Market volatility',
+    'Sector rotation',
+    'Foreign outflow risk',
+  ]
+
+  if (indicators.rsi > 70) keyRisks.push('Overbought conditions')
+  if (indicators.rsi < 30) keyRisks.push('Oversold bounce risk')
+  if (indicators.volumeRatio < 1) keyRisks.push('Low volume participation')
+
+  // Generate strategy bias
+  let strategyBias = 'Stay defensive'
+  if (marketRegime === 'AGGRESSIVE') {
+    strategyBias = 'Can be selective aggressive'
+  } else if (marketRegime === 'NORMAL') {
+    strategyBias = 'Balanced approach with caution'
+  }
+
   return {
     marketRegime,
     riskStance,
     sectorTake: 'Analyze sector rotation',
     flowRead: 'Monitor foreign flow',
-    keyRisks: [
-      'Market volatility',
-      'Sector rotation',
-      'Foreign outflow risk',
-    ],
-    strategyBias: marketRegime === 'AGGRESSIVE' ? 'Can be selective aggressive' : 'Stay defensive',
-    reasoning: `Market regime ${marketRegime} based on trend ${indicators.trend} and volume ${indicators.volumeRatio.toFixed(2)}x.`,
+    keyRisks,
+    strategyBias,
+    reasoning: `Market regime ${marketRegime} based on trend ${indicators.trend} and volume ${indicators.volumeRatio.toFixed(2)}x. Risk stance: ${riskStance}.`,
   }
 }
 
 /**
- * Run debate agent
+ * Run debate agent (deterministic, no AI required)
  */
-async function runDebateAgent(
+function runDebateAgent(
   scanner: ScannerResult,
   risk: RiskResult,
-  context: ContextResult,
-  settings: AISettings
-): Promise<DebateResult> {
+  context: ContextResult
+): DebateResult {
   const bullishArguments: string[] = []
   const bearishArguments: string[] = []
 
@@ -330,6 +383,9 @@ async function runDebateAgent(
   if (context.marketRegime === 'AGGRESSIVE') {
     bullishArguments.push('Favorable market regime')
   }
+  if (scanner.setupType === 'breakout' || scanner.setupType === 'pullback') {
+    bullishArguments.push(`Clear ${scanner.setupType} setup`)
+  }
 
   if (scanner.warnings.length > 0) {
     bearishArguments.push(...scanner.warnings)
@@ -339,6 +395,9 @@ async function runDebateAgent(
   }
   if (context.marketRegime === 'DEFENSIVE') {
     bearishArguments.push('Defensive market conditions')
+  }
+  if (scanner.confidence === 'LOW') {
+    bearishArguments.push('Low confidence in setup')
   }
 
   // Determine consensus
@@ -351,30 +410,33 @@ async function runDebateAgent(
 
   const confidence = Math.min(100, Math.max(0, scanner.setupScore))
 
+  // Generate key factors
+  const keyFactors: string[] = [
+    `Setup quality: ${scanner.setupScore}/100`,
+    `Risk/reward: ${risk.rr1.toFixed(2)}`,
+    `Market regime: ${context.marketRegime}`,
+    `Setup type: ${scanner.setupType}`,
+  ]
+
   return {
     bullishArguments,
     bearishArguments,
     consensus,
     confidence,
-    keyFactors: [
-      `Setup quality: ${scanner.setupScore}/100`,
-      `Risk/reward: ${risk.rr1.toFixed(2)}`,
-      `Market regime: ${context.marketRegime}`,
-    ],
+    keyFactors,
     reasoning: `${bullishArguments.length} bullish vs ${bearishArguments.length} bearish arguments. Consensus: ${consensus}.`,
   }
 }
 
 /**
- * Run decision agent
+ * Run decision agent (deterministic, no AI required)
  */
-async function runDecisionAgent(
+function runDecisionAgent(
   scanner: ScannerResult,
   risk: RiskResult,
   context: ContextResult,
-  debate: DebateResult,
-  settings: AISettings
-): Promise<DecisionResult> {
+  debate: DebateResult
+): DecisionResult {
   // Determine final decision
   let finalDecision: DecisionResult['finalDecision'] = 'REJECT'
 
@@ -389,6 +451,45 @@ async function runDecisionAgent(
   const confidenceScore = scanner.setupScore
   const successProbability = Math.min(95, Math.max(30, scanner.setupScore + 10))
 
+  // Determine risk level
+  let riskLevel: DecisionResult['riskLevel'] = 'MEDIUM'
+  if (risk.rr1 >= 3 && scanner.setupScore >= 75) {
+    riskLevel = 'LOW'
+  } else if (risk.rr1 < 1.5 || scanner.setupScore < 50) {
+    riskLevel = 'HIGH'
+  }
+
+  // Determine urgency
+  let urgency: DecisionResult['urgency'] = 'monitor'
+  if (finalDecision === 'BUY_NOW' && scanner.setupType === 'breakout') {
+    urgency = 'immediate'
+  } else if (finalDecision === 'BUY_NOW') {
+    urgency = 'soon'
+  }
+
+  // Generate reasoning
+  const reasoning = `Final decision ${finalDecision} based on scanner ${scanner.status} (${scanner.setupScore}/100), risk ${risk.verdict} (RR ${risk.rr1.toFixed(2)}), market regime ${context.marketRegime}, and debate consensus ${debate.consensus}.`
+
+  // Generate action items
+  const actionItems: string[] = []
+  if (finalDecision === 'BUY_NOW') {
+    actionItems.push(`Enter near ${risk.entryZone}`)
+    actionItems.push(`Set stop loss at ${risk.stopLoss}`)
+    actionItems.push(`Target TP1 at ${risk.tp1} and TP2 at ${risk.tp2}`)
+    actionItems.push(`Position size: ${risk.positionSize.lots} lots`)
+  } else if (finalDecision === 'WATCHLIST') {
+    actionItems.push('Add to watchlist')
+    actionItems.push('Monitor for better entry')
+    actionItems.push('Wait for volume confirmation')
+  } else if (finalDecision === 'WAIT') {
+    actionItems.push('Wait for clearer signals')
+    actionItems.push('Monitor market conditions')
+    actionItems.push('Re-evaluate after market close')
+  } else {
+    actionItems.push('Skip this setup')
+    actionItems.push('Look for better opportunities')
+  }
+
   return {
     finalDecision,
     confidenceScore,
@@ -398,7 +499,9 @@ async function runDecisionAgent(
     bullishScenario: `Price targets ${risk.tp1} (TP1) and ${risk.tp2} (TP2) with RR ${risk.rr1.toFixed(2)}`,
     bearishScenario: `Stop loss at ${risk.stopLoss} with max loss ${formatCurrency(risk.positionSize.maxLoss)}`,
     executionNotes: context.marketRegime === 'AGGRESSIVE' ? 'Can enter on pullback' : 'Wait for confirmation',
-    reasoning: `Final decision ${finalDecision} based on scanner ${scanner.status}, risk ${risk.verdict}, and debate ${debate.consensus}.`,
+    reasoning,
+    riskLevel,
+    urgency,
   }
 }
 
@@ -509,6 +612,8 @@ function createRejectedPipeline(
       bearishScenario: reason,
       executionNotes: 'Skip this setup',
       reasoning: `Rejected: ${reason}`,
+      riskLevel: 'HIGH',
+      urgency: 'monitor',
     },
     finalScore: 0,
     confidence: 'LOW',

@@ -47,6 +47,22 @@ export async function runDecisionAgent(
   const confidenceScore = scanner.setupScore
   const successProbability = Math.min(95, Math.max(30, scanner.setupScore + 10))
 
+  // Determine risk level
+  let riskLevel: DecisionResult['riskLevel'] = 'MEDIUM'
+  if (risk.rr1 >= 3 && scanner.setupScore >= 75) {
+    riskLevel = 'LOW'
+  } else if (risk.rr1 < 1.5 || scanner.setupScore < 50) {
+    riskLevel = 'HIGH'
+  }
+
+  // Determine urgency
+  let urgency: DecisionResult['urgency'] = 'monitor'
+  if (finalDecision === 'BUY_NOW' && scanner.setupType === 'breakout') {
+    urgency = 'immediate'
+  } else if (finalDecision === 'BUY_NOW') {
+    urgency = 'soon'
+  }
+
   return {
     finalDecision,
     confidenceScore,
@@ -57,6 +73,8 @@ export async function runDecisionAgent(
     bearishScenario: `Stop loss at ${risk.stopLoss} with max loss ${formatCurrency(risk.positionSize.maxLoss)}`,
     executionNotes: context.marketRegime === 'AGGRESSIVE' ? 'Can enter on pullback' : 'Wait for confirmation',
     reasoning: `Final decision ${finalDecision} based on scanner ${scanner.status}, risk ${risk.verdict}, and debate ${debate.consensus}.`,
+    riskLevel,
+    urgency,
   }
 }
 
