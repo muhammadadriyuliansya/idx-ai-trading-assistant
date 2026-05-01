@@ -339,3 +339,4 @@ Project Link: [https://github.com/muhammadadriyuliansya/idx-ai-trading-assistant
 ---
 
 **IDX AI Trading Assistant** - Bukan auto trading. Bukan prediksi harga. Decision tetap di tangan trader.
+hehehe
