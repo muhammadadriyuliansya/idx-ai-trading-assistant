@@ -75,6 +75,32 @@ async function fetchBars(symbol: string, days = 260): Promise<Bar[]> {
   return toBars(quotes);
 }
 
+// Tambahan: fetch fundamental dari Yahoo Finance
+async function fetchFundamental(ticker: string) {
+  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}.JK?modules=summaryDetail,defaultKeyStatistics,financialData`;
+  
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' }
+  });
+  
+  if (!res.ok) return null;
+  const json = await res.json();
+  const result = json?.quoteSummary?.result?.[0];
+  if (!result) return null;
+
+  return {
+    per: result.summaryDetail?.trailingPE?.raw ?? null,
+    pbv: result.summaryDetail?.priceToBook?.raw ?? null,
+    dividendYield: result.summaryDetail?.dividendYield?.raw ?? null,
+    marketCap: result.summaryDetail?.marketCap?.raw ?? null,
+    roe: result.financialData?.returnOnEquity?.raw ?? null,
+    der: result.financialData?.debtToEquity?.raw ?? null,
+    revenueGrowth: result.financialData?.revenueGrowth?.raw ?? null,
+    earningsGrowth: result.financialData?.earningsGrowth?.raw ?? null,
+    eps: result.defaultKeyStatistics?.trailingEps?.raw ?? null,
+  };
+}
+
 function classifyIhsg(bars: Bar[]): {
   trend: "bullish" | "sideways" | "bearish" | "unknown";
   change1d?: number;
@@ -103,9 +129,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [bars, ihsgBars] = await Promise.all([
+    const tickerClean = symbol.replace(".JK", "");
+
+    // Paralel: fetch data harga, IHSG, dan fundamental
+    const [bars, ihsgBars, fundamental] = await Promise.all([
       fetchBars(symbol),
       fetchBars("^JKSE").catch(() => [] as Bar[]),
+      fetchFundamental(tickerClean).catch(() => null),
     ]);
 
     if (bars.length < 60) {
@@ -185,6 +215,7 @@ export async function GET(request: Request) {
         ihsgChange5d: ihsg.change5d,
         volRatio,
       },
+      fundamental, // tambahan fundamental
     };
 
     return NextResponse.json(result, {

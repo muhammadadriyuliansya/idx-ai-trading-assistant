@@ -115,6 +115,17 @@ export interface RiskCalcResult {
   positionValue: number;
 }
 
+export interface SetupScoreBreakdown {
+  trend: number;
+  momentum: number;
+  volume: number;
+  context: number;
+  rrQuality: number;
+  total: number;
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+  status: "VALID" | "WATCHLIST" | "REJECT";
+}
+
 export interface QuoteResult {
   ticker: string;
   fetchedAt: number;
@@ -131,15 +142,15 @@ export interface QuoteResult {
     ihsgChange5d?: number;
     volRatio: number;
   };
-}
-
-export interface SetupScoreBreakdown {
-  trend: number;
-  momentum: number;
-  volume: number;
-  context: number;
-  rrQuality: number;
-  total: number;
-  confidence: "LOW" | "MEDIUM" | "HIGH";
-  status: "VALID" | "WATCHLIST" | "REJECT";
+  fundamental?: {
+    per: number | null;
+    pbv: number | null;
+    dividendYield: number | null;
+    marketCap: number | null;
+    roe: number | null;
+    der: number | null;
+    revenueGrowth: number | null;
+    earningsGrowth: number | null;
+    eps: number | null;
+  } | null;
 }
