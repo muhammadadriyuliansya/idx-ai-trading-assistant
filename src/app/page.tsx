@@ -19,7 +19,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Sparkles, Zap } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Sparkles, Zap, Copy, Download, CheckCircle2, AlertTriangle, Eye } from "lucide-react";
 import {
   runFullAnalysis,
   type AnalysisResult,
@@ -30,7 +31,6 @@ import {
   RiskDisplay,
   ContextDisplay,
   DecisionDisplay,
-  JournalDisplay,
 } from "@/components/displays";
 import { useLocalStorage } from "@/lib/storage";
 import { FormattedNumberInput } from "@/components/formatted-input";
@@ -50,6 +50,11 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+
+  // Export state
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportText, setExportText] = useState("");
+  const [exportTitle, setExportTitle] = useState("");
 
   const handleAnalyze = async () => {
     const trimmedTicker = ticker.trim().toUpperCase();
@@ -286,7 +291,206 @@ export default function HomePage() {
               <DecisionDisplay analysis={analysis} />
             </div>
 
-            <JournalDisplay />
+            {/* ═══════════════════════════════════════════════ */}
+            {/* KESIMPULAN — Ringkasan Utama + Export */}
+            {/* ═══════════════════════════════════════════════ */}
+            <Card className="border-2 border-zinc-700/80 bg-gradient-to-br from-zinc-900 via-zinc-950 to-zinc-900">
+              <CardContent className="p-5">
+                <div className="flex items-start gap-4">
+                  {/* Icon */}
+                  <div className={`flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center ${
+                    analysis.decision.verdict === "BUY_NOW"
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : analysis.decision.verdict === "WATCHLIST"
+                      ? "bg-amber-500/15 text-amber-400"
+                      : analysis.decision.verdict === "WAIT"
+                      ? "bg-blue-500/15 text-blue-400"
+                      : "bg-red-500/15 text-red-400"
+                  }`}>
+                    {analysis.decision.verdict === "BUY_NOW" ? (
+                      <CheckCircle2 className="h-7 w-7" />
+                    ) : analysis.decision.verdict === "WATCHLIST" ? (
+                      <Eye className="h-7 w-7" />
+                    ) : analysis.decision.verdict === "WAIT" ? (
+                      <Sparkles className="h-7 w-7" />
+                    ) : (
+                      <AlertTriangle className="h-7 w-7" />
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500">Kesimpulan</span>
+                      <Badge
+                        className={`text-xs px-2 py-0.5 ${
+                          analysis.decision.verdict === "BUY_NOW"
+                            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                            : analysis.decision.verdict === "WATCHLIST"
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                            : analysis.decision.verdict === "WAIT"
+                            ? "bg-blue-500/20 text-blue-300 border-blue-500/30"
+                            : "bg-red-500/20 text-red-300 border-red-500/30"
+                        }`}
+                      >
+                        {analysis.decision.verdict.replace("_", " ")}
+                      </Badge>
+                    </div>
+
+                    {/* Verdict text */}
+                    <h3 className="text-base font-semibold text-zinc-100 mb-2">
+                      {analysis.decision.verdict === "BUY_NOW" && (
+                        <>Setup <span className="text-emerald-400">BUY NOW</span> untuk {analysis.ticker}</>
+                      )}
+                      {analysis.decision.verdict === "WATCHLIST" && (
+                        <><span className="text-amber-400">Masukkan ke Watchlist</span> — pantau entry yang lebih baik</>
+                      )}
+                      {analysis.decision.verdict === "WAIT" && (
+                        <><span className="text-blue-400">Tunggu</span> — belum ada sinyal yang jelas</>
+                      )}
+                      {analysis.decision.verdict === "REJECT" && (
+                        <><span className="text-red-400">Setup ditolak</span> — tidak memenuhi kriteria</>
+                      )}
+                    </h3>
+
+                    {/* Key metrics */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
+                      <div>
+                        <span className="text-zinc-500">Score</span>
+                        <div className={`font-mono font-bold text-base ${
+                          analysis.summary.score >= 70 ? "text-emerald-400" :
+                          analysis.summary.score >= 50 ? "text-amber-400" : "text-red-400"
+                        }`}>{analysis.summary.score}/100</div>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">Confidence</span>
+                        <div className="font-mono font-bold text-base text-zinc-200">{analysis.summary.confidence}</div>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">Risk/Reward</span>
+                        <div className="font-mono font-bold text-base text-zinc-200">1:{analysis.risk.rr.toFixed(2)}</div>
+                      </div>
+                      <div>
+                        <span className="text-zinc-500">Regime</span>
+                        <div className="font-mono font-bold text-base text-zinc-200">{analysis.context.regime}</div>
+                      </div>
+                    </div>
+
+                    {/* Entry details (if BUY_NOW or WATCHLIST) */}
+                    {analysis.risk.calc && (analysis.decision.verdict === "BUY_NOW" || analysis.decision.verdict === "WATCHLIST") && (
+                      <div className="rounded-lg bg-zinc-800/40 border border-zinc-700/50 p-3 text-xs text-zinc-300 mb-3">
+                        <strong>Entry:</strong> {analysis.risk.calc.entry.toFixed(0)} &nbsp;|&nbsp;
+                        <strong>SL:</strong> {analysis.risk.calc.stopLoss.toFixed(0)} &nbsp;|&nbsp;
+                        <strong>TP1:</strong> {analysis.risk.calc.takeProfit1.toFixed(0)} &nbsp;|&nbsp;
+                        <strong>TP2:</strong> {analysis.risk.calc.takeProfit2.toFixed(0)} &nbsp;|&nbsp;
+                        <strong>Size:</strong> {analysis.risk.calc.lots} lots
+                      </div>
+                    )}
+
+                    {/* Reasoning */}
+                    {analysis.decision.reasoning && (
+                      <p className="text-sm text-zinc-400 mb-3">{analysis.decision.reasoning}</p>
+                    )}
+
+                    {/* Export buttons */}
+                    <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-800/50">
+                      <button
+                        onClick={() => {
+                          const lines: string[] = [];
+                          const a = analysis;
+                          lines.push("=".repeat(50));
+                          lines.push(`IDX TRADING BRIEF: ${a.ticker}`);
+                          lines.push(`Generated: ${new Date().toLocaleDateString("id-ID")}`);
+                          lines.push("=".repeat(50));
+                          lines.push("");
+                          lines.push(`Verdict    : ${a.decision.verdict.replace("_", " ")}`);
+                          lines.push(`Score      : ${a.summary.score}/100`);
+                          lines.push(`Confidence : ${a.summary.confidence}`);
+                          lines.push(`RR         : 1:${a.risk.rr.toFixed(2)}`);
+                          lines.push(`Regime     : ${a.context.regime}`);
+                          lines.push("");
+                          lines.push("--- TECHNICAL ---");
+                          lines.push(`Trend  : ${a.scanner.trend}`);
+                          lines.push(`Score  : ${a.scanner.setupScore.total}/100`);
+                          lines.push(`Status : ${a.scanner.setupScore.status}`);
+                          lines.push("");
+                          if (a.risk.calc) {
+                            lines.push("--- RISK PLAN ---");
+                            lines.push(`Entry    : ${a.risk.calc.entry.toFixed(0)}`);
+                            lines.push(`Stop Loss: ${a.risk.calc.stopLoss.toFixed(0)}`);
+                            lines.push(`TP1      : ${a.risk.calc.takeProfit1.toFixed(0)} (RR: ${a.risk.calc.riskReward1.toFixed(2)})`);
+                            lines.push(`TP2      : ${a.risk.calc.takeProfit2.toFixed(0)} (RR: ${a.risk.calc.riskReward2.toFixed(2)})`);
+                            lines.push(`Lots     : ${a.risk.calc.lots}`);
+                            lines.push(`Max Loss : Rp ${a.risk.calc.maxLoss.toLocaleString("id-ID")}`);
+                            lines.push("");
+                          }
+                           lines.push("--- CONTEXT ---");
+                           lines.push(`Regime     : ${a.context.regime}`);
+                           if (a.context.ihsgChange1d != null) lines.push(`IHSG 1d  : ${a.context.ihsgChange1d.toFixed(2)}%`);
+                           if (a.context.ihsgChange5d != null) lines.push(`IHSG 5d  : ${a.context.ihsgChange5d.toFixed(2)}%`);
+                           lines.push("");
+                           lines.push("--- REASONING ---");
+                           lines.push(a.decision.reasoning || "-");
+                           lines.push("=".repeat(50));
+                           const text = lines.join("\n");
+                           navigator.clipboard.writeText(text);
+                         }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition-colors"
+                      >
+                        <Copy className="h-3 w-3" /> Copy Brief
+                      </button>
+                      <button
+                        onClick={() => {
+                          const lines: string[] = [];
+                          const a = analysis;
+                          lines.push("=".repeat(50));
+                          lines.push(`IDX TRADING BRIEF: ${a.ticker}`);
+                          lines.push(`Generated: ${new Date().toLocaleDateString("id-ID")}`);
+                          lines.push("=".repeat(50));
+                          lines.push("");
+                          lines.push(`Verdict    : ${a.decision.verdict.replace("_", " ")}`);
+                          lines.push(`Score      : ${a.summary.score}/100`);
+                          lines.push(`Confidence : ${a.summary.confidence}`);
+                          lines.push(`RR         : 1:${a.risk.rr.toFixed(2)}`);
+                          lines.push(`Regime     : ${a.context.regime}`);
+                          lines.push("");
+                          lines.push("--- TECHNICAL ---");
+                          lines.push(`Trend  : ${a.scanner.trend}`);
+                          lines.push(`Score  : ${a.scanner.setupScore.total}/100`);
+                          lines.push(`Status : ${a.scanner.setupScore.status}`);
+                          lines.push("");
+                          if (a.risk.calc) {
+                            lines.push("--- RISK PLAN ---");
+                            lines.push(`Entry    : ${a.risk.calc.entry.toFixed(0)}`);
+                            lines.push(`Stop Loss: ${a.risk.calc.stopLoss.toFixed(0)}`);
+                            lines.push(`TP1      : ${a.risk.calc.takeProfit1.toFixed(0)}`);
+                            lines.push(`TP2      : ${a.risk.calc.takeProfit2.toFixed(0)}`);
+                            lines.push(`Lots     : ${a.risk.calc.lots}`);
+                            lines.push(`Max Loss : Rp ${a.risk.calc.maxLoss.toLocaleString("id-ID")}`);
+                            lines.push("");
+                          }
+                           lines.push("--- CONTEXT ---");
+                           lines.push(`Regime     : ${a.context.regime}`);
+                           if (a.context.ihsgChange1d != null) lines.push(`IHSG 1d  : ${a.context.ihsgChange1d.toFixed(2)}%`);
+                           if (a.context.ihsgChange5d != null) lines.push(`IHSG 5d  : ${a.context.ihsgChange5d.toFixed(2)}%`);
+                           lines.push("");
+                           lines.push("--- REASONING ---");
+                           lines.push(a.decision.reasoning || "-");
+                           lines.push("=".repeat(50));
+                           const text = lines.join("\n");
+                           setExportText(text);
+                          setExportTitle("Trading Brief");
+                          setShowExportModal(true);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition-colors"
+                      >
+                        <Download className="h-3 w-3" /> Export Brief
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </motion.div>
         )}
 

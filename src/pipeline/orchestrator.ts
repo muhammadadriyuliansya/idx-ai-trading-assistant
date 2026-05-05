@@ -1,6 +1,9 @@
 /**
- * Central orchestrator for the unified analysis pipeline
- * Coordinates data fetching, indicator calculation, and agent execution
+ * Central orchestrator for the enhanced analysis pipeline (v2)
+ * Coordinates multi-layer institutional trading workflow:
+ * Market Data → Intelligence → Analysts → Research → Thesis → Portfolio → Decision
+ *
+ * Pipeline utama tetap deterministic. AI hanya optional di export/refinement.
  */
 
 import type {
@@ -12,51 +15,175 @@ import type {
   ContextResult,
   DebateResult,
   DecisionResult,
+  AnalystReport,
+  PortfolioDecision,
 } from './types'
 import type { AISettings } from '@/lib/types'
-import { applyHardFilters, DEFAULT_FILTERS } from './filters'
+import { applyHardFilters } from './filters'
 import { calculateSetupScore, computeRisk, calculateRiskReward } from '@/lib/calc'
 
+// Phase 1 — Market Intelligence
+import { fetchNewsIntelligence } from './analysts/news-analyst'
+import { computeSocialSentiment } from './analysts/sentiment-analyst'
+import { computeMacroContext } from './analysts/macro-analyst'
+
+// Phase 2 — Analyst Team
+import { analyzeTechnical } from './analysts/technical-analyst'
+import { analyzeFundamental } from './analysts/fundamental-analyst'
+import { analyzeNews } from './analysts/news-analyst-full'
+
+// Phase 3 — Research Debate
+import { bullResearch } from './research/bull-researcher'
+import { bearResearch } from './research/bear-researcher'
+import { computeConsensus } from './research/consensus-engine'
+
+// Phase 4 — Thesis Engine
+import { buildThesis } from './thesis/thesis-builder'
+
+// Phase 5 — Portfolio Manager
+import { evaluatePortfolio } from './portfolio/portfolio-manager'
+
 /**
- * Run full analysis pipeline for a ticker (AI optional)
+ * Run full analysis pipeline for a ticker (enhanced v2)
+ * All fetch operations run in parallel where possible.
+ * Failure in one non-critical source does NOT kill the pipeline.
  */
 export async function runFullAnalysis(
   ticker: string,
-  settings?: AISettings
+  _settings?: AISettings
 ): Promise<AnalysisPipeline> {
   try {
-    // 1. Fetch market data and indicators from API
-    const { marketData, indicators } = await fetchMarketDataWithIndicators(ticker)
+    // ============================================================
+    // LAYER 1: Market Data
+    // ============================================================
+    const { marketData, indicators, fundamental, ihsgChange5d, ihsgChange1d } =
+      await fetchMarketDataWithIndicators(ticker)
 
-    // 2. Apply hard filters
+    // ============================================================
+    // LAYER 1b: Hard Filters (legacy compatibility)
+    // ============================================================
     const filterResult = applyHardFilters(marketData, indicators)
     if (!filterResult.passed) {
+      // Still run the full pipeline but mark as rejected
       return createRejectedPipeline(ticker, marketData, indicators, filterResult.reason || 'Failed hard filters')
     }
 
-    // 3. Run scanner agent (deterministic, no AI required)
+    // ============================================================
+    // LAYER 2: Market Intelligence (parallel fetch)
+    // ============================================================
+    const [newsIntelligence, macroContext] = await Promise.allSettled([
+      fetchNewsIntelligence(ticker.replace('.JK', '')),
+      Promise.resolve(
+        computeMacroContext({
+          marketData,
+          indicators,
+          ihsgChange5d,
+          ihsgChange1d,
+        })
+      ),
+    ])
+
+    const news = newsIntelligence.status === 'fulfilled' ? newsIntelligence.value : null
+    const macro = macroContext.status === 'fulfilled' ? macroContext.value : null
+
+    // Social sentiment dari news headlines
+    const socialSentiment = news && news.recentHeadlines.length > 0
+      ? computeSocialSentiment(news.recentHeadlines)
+      : createEmptySocialSentiment()
+
+    // Attach news to macro context for reference
+    if (macro) {
+      // macro already computed, sentiment available separately
+    }
+
+    // ============================================================
+    // LAYER 3: Analyst Team (parallel)
+    // ============================================================
+    const [technicalReport, fundamentalReport, newsReport] = await Promise.allSettled([
+      Promise.resolve(
+        analyzeTechnical({ marketData, indicators })
+      ),
+      Promise.resolve(
+        analyzeFundamental({ fundamental: fundamental ?? null })
+      ),
+      Promise.resolve(
+        analyzeNews({ news, sentiment: socialSentiment })
+      ),
+    ])
+
+    const analystReports: AnalystReport[] = []
+    if (technicalReport.status === 'fulfilled') analystReports.push(technicalReport.value)
+    if (fundamentalReport.status === 'fulfilled') analystReports.push(fundamentalReport.value)
+    if (newsReport.status === 'fulfilled') analystReports.push(newsReport.value)
+
+    // ============================================================
+    // LAYER 4: Legacy Pipeline (scanner → risk → context → debate → decision)
+    // ============================================================
     const scanner = runScannerAgent(marketData, indicators)
-
-    // 4. Run risk agent (deterministic, no AI required)
-    const risk = runRiskAgent(marketData, indicators, scanner)
-
-    // 5. Run context agent (deterministic, no AI required)
+    const risk = runRiskAgent(marketData)
     const context = runContextAgent(marketData, indicators)
-
-    // 6. Run debate agent (deterministic, no AI required)
     const debate = runDebateAgent(scanner, risk, context)
-
-    // 7. Run decision agent (deterministic, no AI required)
     const decision = runDecisionAgent(scanner, risk, context, debate)
 
-    // 8. Calculate final score
-    const finalScore = calculateFinalScore(scanner, risk, context, debate, decision)
+    // ============================================================
+    // LAYER 5: Research Debate (enhanced)
+    // ============================================================
+    const marketRegime = context.marketRegime
+    const bullCase = bullResearch({ analystReports, marketRegime })
+    const bearCase = bearResearch({ analystReports, marketRegime })
+    const analystScores = analystReports.map((r) => r.score)
+
+    const debateMatrix = computeConsensus({
+      bullCase,
+      bearCase,
+      analystScores,
+      marketRegime,
+    })
+
+    // ============================================================
+    // LAYER 6: Institutional Thesis
+    // ============================================================
+    const thesis = buildThesis({
+      analystReports,
+      debateMatrix,
+      marketRegime,
+      news,
+      sentiment: socialSentiment,
+      macro,
+      fundamental,
+      ticker: ticker.replace('.JK', ''),
+    })
+
+    // ============================================================
+    // LAYER 7: Portfolio Manager
+    // ============================================================
+    const rr = calculateRiskReward(
+      marketData.currentPrice,
+      marketData.support,
+      marketData.resistance
+    )
+
+    const portfolioDecision = evaluatePortfolio({
+      thesis,
+      debateMatrix,
+      macro,
+      riskReward: rr,
+      setupScore: scanner.setupScore,
+      liquidity: macro?.liquidityCondition ?? 'normal',
+      volatility: macro?.volatilityState ?? 'normal',
+    })
+
+    // ============================================================
+    // LAYER 8: Final Score
+    // ============================================================
+    const finalScore = calculateFinalScore(scanner, risk, context, debate, decision, analystReports, portfolioDecision)
 
     return {
       ticker,
       timestamp: Date.now(),
       marketData,
       indicators,
+      fundamental,
       scanner,
       risk,
       context,
@@ -65,6 +192,23 @@ export async function runFullAnalysis(
       finalScore,
       confidence: scanner.confidence,
       status: scanner.status,
+
+      // Phase 1 — Market Intelligence
+      newsIntelligence: news ?? createEmptyNewsIntelligence(),
+      socialSentiment,
+      macroContext: macro ?? createEmptyMacroContext(),
+
+      // Phase 2 — Analyst Reports
+      analystReports,
+
+      // Phase 3 — Research Debate
+      debateMatrix,
+
+      // Phase 4 — Institutional Thesis
+      thesis,
+
+      // Phase 5 — Portfolio Manager
+      portfolioDecision,
     }
   } catch (error) {
     console.error(`Analysis failed for ${ticker}:`, error)
@@ -111,7 +255,13 @@ export async function fetchMarketData(ticker: string): Promise<MarketData> {
  */
 export async function fetchMarketDataWithIndicators(
   ticker: string
-): Promise<{ marketData: MarketData; indicators: IndicatorSet }> {
+): Promise<{
+  marketData: MarketData
+  indicators: IndicatorSet
+  fundamental: AnalysisPipeline['fundamental']
+  ihsgChange5d?: number
+  ihsgChange1d?: number
+}> {
   const normalisedTicker = ticker.trim().toUpperCase()
   const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
@@ -148,13 +298,13 @@ export async function fetchMarketDataWithIndicators(
     vwap: parseFloat(data.scanner.vwap),
     rsi: parseFloat(data.scanner.rsi),
     macd: {
-      macd: 0, // Not provided by API, calculated from label
+      macd: 0,
       signal: 0,
       histogram: 0,
       label: data.scanner.macd || 'netral',
     },
     stochastic: {
-      k: 50, // Not provided by API, calculated from label
+      k: 50,
       d: 50,
       label: data.scanner.stochastic || 'neutral',
     },
@@ -162,7 +312,13 @@ export async function fetchMarketDataWithIndicators(
     volumeRatio: data.meta.volRatio,
   }
 
-  return { marketData, indicators }
+  return {
+    marketData,
+    indicators,
+    fundamental: data.fundamental ?? null,
+    ihsgChange5d: data.meta.ihsgChange5d,
+    ihsgChange1d: data.meta.ihsgChange1d,
+  }
 }
 
 /**
@@ -172,7 +328,6 @@ function runScannerAgent(
   marketData: MarketData,
   indicators: IndicatorSet
 ): ScannerResult {
-  // Calculate setup score
   const setupScore = calculateSetupScore(
     {
       ticker: marketData.ticker,
@@ -200,12 +355,10 @@ function runScannerAgent(
     calculateRiskReward(marketData.currentPrice, marketData.support, marketData.resistance)
   )
 
-  // Determine confidence and status
   let confidence: ScannerResult['confidence'] = 'LOW'
   if (setupScore.total >= 75) confidence = 'HIGH'
   else if (setupScore.total >= 55) confidence = 'MEDIUM'
 
-  // Determine setup type based on indicators
   let setupType: ScannerResult['setupType'] = 'no_setup'
   if (indicators.trend === 'bullish' && indicators.volumeRatio > 1.5) {
     setupType = 'breakout'
@@ -215,14 +368,12 @@ function runScannerAgent(
     setupType = 'reversal'
   }
 
-  // Generate warnings
   const warnings: string[] = []
   if (indicators.rsi > 80) warnings.push('RSI overbought (>80)')
   if (indicators.rsi < 20) warnings.push('RSI oversold (<20)')
   if (indicators.volumeRatio < 1) warnings.push('Volume below average')
   if (indicators.macd.label.includes('bearish')) warnings.push('MACD bearish')
 
-  // Generate key reads
   const keyReads: string[] = [
     `Trend: ${indicators.trend}`,
     `Volume: ${indicators.volumeRatio.toFixed(2)}x average`,
@@ -231,7 +382,6 @@ function runScannerAgent(
     `MACD: ${indicators.macd.label}`,
   ]
 
-  // Generate action plan
   let actionPlan = 'Monitor for confirmation'
   if (setupType === 'breakout') {
     actionPlan = 'Wait for pullback or volume confirmation'
@@ -257,18 +407,15 @@ function runScannerAgent(
  * Run risk agent (deterministic, no AI required)
  */
 function runRiskAgent(
-  marketData: MarketData,
-  indicators: IndicatorSet,
-  scanner: ScannerResult
+  marketData: MarketData
 ): RiskResult {
-  // Calculate risk parameters
   const riskCalc = computeRisk({
     ticker: marketData.ticker,
     currentPrice: marketData.currentPrice.toString(),
     support: marketData.support.toString(),
     resistance: marketData.resistance.toString(),
     atr: marketData.atr.toString(),
-    capital: '100000000', // Default 100M
+    capital: '100000000',
     riskPerTrade: '1',
   })
 
@@ -276,7 +423,6 @@ function runRiskAgent(
     throw new Error('Failed to calculate risk parameters')
   }
 
-  // Determine verdict
   let verdict: RiskResult['verdict'] = 'REJECT'
   if (riskCalc.riskReward1 >= 2.0) {
     verdict = 'ACCEPT'
@@ -284,7 +430,6 @@ function runRiskAgent(
     verdict = 'ADJUST'
   }
 
-  // Generate reasoning
   let reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} meets minimum requirements. Position sized for 1% risk.`
   if (verdict === 'REJECT') {
     reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} below minimum 2.0. Consider adjusting entry or waiting for better setup.`
@@ -320,7 +465,6 @@ function runContextAgent(
   marketData: MarketData,
   indicators: IndicatorSet
 ): ContextResult {
-  // Simplified context analysis
   let marketRegime: ContextResult['marketRegime'] = 'NORMAL'
   let riskStance: ContextResult['riskStance'] = 'NEUTRAL'
 
@@ -332,7 +476,6 @@ function runContextAgent(
     riskStance = 'RISK-OFF'
   }
 
-  // Generate key risks
   const keyRisks: string[] = [
     'Market volatility',
     'Sector rotation',
@@ -343,7 +486,6 @@ function runContextAgent(
   if (indicators.rsi < 30) keyRisks.push('Oversold bounce risk')
   if (indicators.volumeRatio < 1) keyRisks.push('Low volume participation')
 
-  // Generate strategy bias
   let strategyBias = 'Stay defensive'
   if (marketRegime === 'AGGRESSIVE') {
     strategyBias = 'Can be selective aggressive'
@@ -373,7 +515,6 @@ function runDebateAgent(
   const bullishArguments: string[] = []
   const bearishArguments: string[] = []
 
-  // Generate arguments based on analysis
   if (scanner.setupScore >= 70) {
     bullishArguments.push(`Strong setup score ${scanner.setupScore}/100`)
   }
@@ -400,7 +541,6 @@ function runDebateAgent(
     bearishArguments.push('Low confidence in setup')
   }
 
-  // Determine consensus
   let consensus: DebateResult['consensus'] = 'NEUTRAL'
   if (bullishArguments.length > bearishArguments.length) {
     consensus = 'BULLISH'
@@ -410,7 +550,6 @@ function runDebateAgent(
 
   const confidence = Math.min(100, Math.max(0, scanner.setupScore))
 
-  // Generate key factors
   const keyFactors: string[] = [
     `Setup quality: ${scanner.setupScore}/100`,
     `Risk/reward: ${risk.rr1.toFixed(2)}`,
@@ -437,7 +576,6 @@ function runDecisionAgent(
   context: ContextResult,
   debate: DebateResult
 ): DecisionResult {
-  // Determine final decision
   let finalDecision: DecisionResult['finalDecision'] = 'REJECT'
 
   if (scanner.status === 'VALID' && risk.verdict === 'ACCEPT' && debate.consensus === 'BULLISH') {
@@ -451,7 +589,6 @@ function runDecisionAgent(
   const confidenceScore = scanner.setupScore
   const successProbability = Math.min(95, Math.max(30, scanner.setupScore + 10))
 
-  // Determine risk level
   let riskLevel: DecisionResult['riskLevel'] = 'MEDIUM'
   if (risk.rr1 >= 3 && scanner.setupScore >= 75) {
     riskLevel = 'LOW'
@@ -459,7 +596,6 @@ function runDecisionAgent(
     riskLevel = 'HIGH'
   }
 
-  // Determine urgency
   let urgency: DecisionResult['urgency'] = 'monitor'
   if (finalDecision === 'BUY_NOW' && scanner.setupType === 'breakout') {
     urgency = 'immediate'
@@ -467,10 +603,8 @@ function runDecisionAgent(
     urgency = 'soon'
   }
 
-  // Generate reasoning
   const reasoning = `Final decision ${finalDecision} based on scanner ${scanner.status} (${scanner.setupScore}/100), risk ${risk.verdict} (RR ${risk.rr1.toFixed(2)}), market regime ${context.marketRegime}, and debate consensus ${debate.consensus}.`
 
-  // Generate action items
   const actionItems: string[] = []
   if (finalDecision === 'BUY_NOW') {
     actionItems.push(`Enter near ${risk.entryZone}`)
@@ -506,32 +640,34 @@ function runDecisionAgent(
 }
 
 /**
- * Calculate final score from all agent results
+ * Calculate final score from all layers
  */
 function calculateFinalScore(
   scanner: ScannerResult,
   risk: RiskResult,
   context: ContextResult,
   debate: DebateResult,
-  decision: DecisionResult
+  decision: DecisionResult,
+  analystReports: AnalystReport[],
+  portfolioDecision: PortfolioDecision,
 ): number {
   let score = 0
 
-  // Scanner contribution (40%)
-  score += scanner.setupScore * 0.4
+  // Scanner contribution (25%)
+  score += scanner.setupScore * 0.25
 
-  // Risk contribution (25%)
+  // Risk contribution (15%)
   if (risk.verdict === 'ACCEPT') {
-    score += 25
-  } else if (risk.verdict === 'ADJUST') {
     score += 15
+  } else if (risk.verdict === 'ADJUST') {
+    score += 8
   }
 
-  // Context contribution (15%)
+  // Context contribution (10%)
   if (context.marketRegime === 'AGGRESSIVE') {
-    score += 15
-  } else if (context.marketRegime === 'NORMAL') {
     score += 10
+  } else if (context.marketRegime === 'NORMAL') {
+    score += 7
   }
 
   // Debate contribution (10%)
@@ -541,8 +677,23 @@ function calculateFinalScore(
     score += 5
   }
 
-  // Decision confidence (10%)
-  score += (decision.confidenceScore / 100) * 10
+  // Analyst team contribution (20%)
+  if (analystReports.length > 0) {
+    const avgScore = analystReports.reduce((sum, r) => sum + r.score, 0) / analystReports.length
+    score += avgScore * 0.2
+  }
+
+  // Portfolio decision contribution (15%)
+  if (portfolioDecision.action === 'APPROVED') {
+    score += 15
+  } else if (portfolioDecision.action === 'WATCHLIST') {
+    score += 8
+  } else if (portfolioDecision.action === 'REDUCE_SIZE') {
+    score += 5
+  }
+
+  // Decision confidence (5%)
+  score += (decision.confidenceScore / 100) * 5
 
   return Math.round(Math.min(100, Math.max(0, score)))
 }
@@ -556,11 +707,22 @@ function createRejectedPipeline(
   indicators: IndicatorSet,
   reason: string
 ): AnalysisPipeline {
+  const emptyAnalyst: AnalystReport = {
+    agent: 'System',
+    bias: 'bearish',
+    confidence: 100,
+    score: 0,
+    summary: `Rejected: ${reason}`,
+    signals: [],
+    risks: [reason],
+  }
+
   return {
     ticker,
     timestamp: Date.now(),
     marketData,
     indicators,
+    fundamental: null,
     scanner: {
       setupType: 'no_setup',
       setupScore: 0,
@@ -618,6 +780,33 @@ function createRejectedPipeline(
     finalScore: 0,
     confidence: 'LOW',
     status: 'REJECT',
+    newsIntelligence: createEmptyNewsIntelligence(),
+    socialSentiment: createEmptySocialSentiment(),
+    macroContext: createEmptyMacroContext(),
+    analystReports: [emptyAnalyst],
+    debateMatrix: {
+      bullCase: [],
+      bearCase: [reason],
+      consensusScore: 10,
+      conflictScore: 0,
+      dominantBias: 'bearish',
+    },
+    thesis: {
+      title: `${ticker.replace('.JK', '')} — Rejected`,
+      executiveSummary: `Setup rejected: ${reason}`,
+      technicalThesis: [],
+      fundamentalThesis: [],
+      sentimentThesis: [],
+      opportunities: [],
+      risks: [reason],
+      conviction: 0,
+    },
+    portfolioDecision: {
+      action: 'REJECTED',
+      conviction: 0,
+      reasoning: [reason],
+      recommendedRiskPercent: 0,
+    },
   }
 }
 
@@ -631,4 +820,38 @@ function formatCurrency(value: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value)
+}
+
+function createEmptySocialSentiment() {
+  return {
+    score: 0,
+    volume: 0,
+    momentum: 'stable' as const,
+    mentions: 0,
+    positiveRatio: 0,
+    negativeRatio: 0,
+    neutralRatio: 1,
+    topKeywords: [],
+  }
+}
+
+function createEmptyNewsIntelligence() {
+  return {
+    sources: [],
+    totalArticles: 0,
+    recentHeadlines: [],
+    dominantSentiment: 'neutral' as const,
+    sentimentScore: 0,
+    keyTopics: [],
+  }
+}
+
+function createEmptyMacroContext() {
+  return {
+    volatilityState: 'normal' as const,
+    sectorMomentum: 'No data available',
+    liquidityCondition: 'normal' as const,
+    globalCue: 'neutral' as const,
+    marketBreadth: 'No data available',
+  }
 }

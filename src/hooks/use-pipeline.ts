@@ -38,7 +38,7 @@ export function usePipeline() {
       }));
 
       try {
-        const pipeline = await runFullAnalysis(ticker, settings);
+        const pipeline = await runFullAnalysis(ticker, settings)
 
         setState((prev) => ({
           ...prev,

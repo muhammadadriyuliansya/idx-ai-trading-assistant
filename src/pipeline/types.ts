@@ -1,11 +1,3 @@
-/**
- * Core types for the unified analysis pipeline
- */
-
-// ============================================================================
-// MARKET DATA
-// ============================================================================
-
 export interface MarketData {
   ticker: string
   currentPrice: number
@@ -20,10 +12,6 @@ export interface MarketData {
   atr: number
   fetchedAt: number
 }
-
-// ============================================================================
-// INDICATORS
-// ============================================================================
 
 export interface MACDResult {
   macd: number
@@ -49,10 +37,6 @@ export interface IndicatorSet {
   trend: 'bullish' | 'sideways' | 'bearish'
   volumeRatio: number
 }
-
-// ============================================================================
-// AGENT RESULTS
-// ============================================================================
 
 export interface ScannerResult {
   setupType: 'breakout' | 'pullback' | 'reversal' | 'distribution' | 'fake' | 'no_setup'
@@ -119,25 +103,141 @@ export interface DecisionResult {
 }
 
 // ============================================================================
-// ANALYSIS PIPELINE
+// MARKET INTELLIGENCE LAYER (Phase 1)
+// ============================================================================
+
+export interface NewsIntelligence {
+  sources: NewsSource[]
+  totalArticles: number
+  recentHeadlines: string[]
+  dominantSentiment: 'positive' | 'negative' | 'neutral'
+  sentimentScore: number
+  keyTopics: string[]
+}
+
+export interface NewsSource {
+  name: string
+  articles: number
+  sentiment: number
+}
+
+export interface SocialSentiment {
+  score: number
+  volume: number
+  momentum: 'rising' | 'falling' | 'stable'
+  mentions: number
+  positiveRatio: number
+  negativeRatio: number
+  neutralRatio: number
+  topKeywords: string[]
+}
+
+export interface MacroContext {
+  volatilityState: 'low' | 'normal' | 'high' | 'extreme'
+  sectorMomentum: string
+  liquidityCondition: 'liquid' | 'normal' | 'tight'
+  globalCue: 'risk-on' | 'neutral' | 'risk-off'
+  marketBreadth: string
+}
+
+// ============================================================================
+// ANALYST TEAM (Phase 2)
+// ============================================================================
+
+export interface AnalystReport {
+  agent: string
+  bias: 'bullish' | 'bearish' | 'neutral'
+  confidence: number
+  score: number
+  summary: string
+  signals: string[]
+  risks: string[]
+}
+
+// ============================================================================
+// RESEARCH DEBATE SYSTEM (Phase 3)
+// ============================================================================
+
+export interface DebateMatrix {
+  bullCase: string[]
+  bearCase: string[]
+  consensusScore: number
+  conflictScore: number
+  dominantBias: 'bullish' | 'bearish' | 'neutral'
+}
+
+// ============================================================================
+// INSTITUTIONAL THESIS (Phase 4)
+// ============================================================================
+
+export interface InstitutionalThesis {
+  title: string
+  executiveSummary: string
+  technicalThesis: string[]
+  fundamentalThesis: string[]
+  sentimentThesis: string[]
+  opportunities: string[]
+  risks: string[]
+  conviction: number
+}
+
+// ============================================================================
+// PORTFOLIO MANAGER (Phase 5)
+// ============================================================================
+
+export interface PortfolioDecision {
+  action: 'APPROVED' | 'WATCHLIST' | 'REJECTED' | 'REDUCE_SIZE'
+  conviction: number
+  reasoning: string[]
+  recommendedRiskPercent: number
+}
+
+// ============================================================================
+// ANALYSIS PIPELINE (Enhanced)
 // ============================================================================
 
 export interface AnalysisPipeline {
   ticker: string
   timestamp: number
 
-  // Raw data
   marketData: MarketData
   indicators: IndicatorSet
 
-  // Agent results
   scanner: ScannerResult
   risk: RiskResult
   context: ContextResult
   debate: DebateResult
   decision: DecisionResult
 
-  // Final metrics
+  fundamental?: {
+    per: number | null;
+    pbv: number | null;
+    dividendYield: number | null;
+    marketCap: number | null;
+    roe: number | null;
+    der: number | null;
+    revenueGrowth: number | null;
+    earningsGrowth: number | null;
+    eps: number | null;
+  } | null;
+
+  // Phase 1 — Market Intelligence
+  newsIntelligence: NewsIntelligence
+  socialSentiment: SocialSentiment
+  macroContext: MacroContext
+
+  // Phase 2 — Analyst Reports
+  analystReports: AnalystReport[]
+
+  // Phase 3 — Research Debate
+  debateMatrix: DebateMatrix
+
+  // Phase 4 — Institutional Thesis
+  thesis: InstitutionalThesis
+
+  // Phase 5 — Portfolio Manager
+  portfolioDecision: PortfolioDecision
+
   finalScore: number
   confidence: 'LOW' | 'MEDIUM' | 'HIGH'
   status: 'VALID' | 'WATCHLIST' | 'REJECT'
@@ -166,10 +266,6 @@ export interface ScanOptions {
   maxResults?: number
 }
 
-// ============================================================================
-// FILTERS
-// ============================================================================
-
 export interface FilterResult {
   passed: boolean
   reason?: string
@@ -182,10 +278,6 @@ export interface FilterConfig {
   minPriceRange?: number
   requireBullishTrend?: boolean
 }
-
-// ============================================================================
-// AGENT INPUTS
-// ============================================================================
 
 export interface ScannerAgentInput {
   marketData: MarketData
