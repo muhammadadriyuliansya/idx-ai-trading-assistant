@@ -10,6 +10,7 @@ import type {
   AnalysisPipeline,
   MarketData,
   IndicatorSet,
+  DataHealth,
   ScannerResult,
   RiskResult,
   ContextResult,
@@ -43,30 +44,55 @@ import { buildThesis } from './thesis/thesis-builder'
 // Phase 5 — Portfolio Manager
 import { evaluatePortfolio } from './portfolio/portfolio-manager'
 
+export interface AnalysisRunOptions {
+  settings?: AISettings
+  capital?: number
+  riskPerTrade?: number
+}
+
+function isAISettings(value: AISettings | AnalysisRunOptions | undefined): value is AISettings {
+  return Boolean(value && 'provider' in value)
+}
+
+function normalizeRunOptions(options?: AISettings | AnalysisRunOptions): AnalysisRunOptions {
+  if (isAISettings(options)) {
+    return { settings: options }
+  }
+
+  return {
+    settings: options?.settings,
+    capital: options?.capital,
+    riskPerTrade: options?.riskPerTrade,
+  }
+}
+
 /**
- * Run full analysis pipeline for a ticker (enhanced v2)
- * All fetch operations run in parallel where possible.
- * Failure in one non-critical source does NOT kill the pipeline.
+ * Run full analysis pipeline for a ticker (enhanced v2).
+ * The core pipeline stays deterministic; AI settings are only carried for
+ * compatibility with manual refinement flows.
  */
 export async function runFullAnalysis(
   ticker: string,
-  _settings?: AISettings
+  options?: AISettings | AnalysisRunOptions
 ): Promise<AnalysisPipeline> {
   try {
+    const runOptions = normalizeRunOptions(options)
+    const capital = runOptions.capital ?? 100000000
+    const riskPerTrade = runOptions.riskPerTrade ?? 1
+
     // ============================================================
     // LAYER 1: Market Data
     // ============================================================
-    const { marketData, indicators, fundamental, ihsgChange5d, ihsgChange1d } =
+    const { marketData, indicators, fundamental, dataHealth, ihsgTrend, ihsgChange5d, ihsgChange1d } =
       await fetchMarketDataWithIndicators(ticker)
 
     // ============================================================
     // LAYER 1b: Hard Filters (legacy compatibility)
     // ============================================================
     const filterResult = applyHardFilters(marketData, indicators)
-    if (!filterResult.passed) {
-      // Still run the full pipeline but mark as rejected
-      return createRejectedPipeline(ticker, marketData, indicators, filterResult.reason || 'Failed hard filters')
-    }
+    const hardFilterReason = filterResult.passed
+      ? null
+      : filterResult.reason || 'Failed hard filters'
 
     // ============================================================
     // LAYER 2: Market Intelligence (parallel fetch)
@@ -119,11 +145,25 @@ export async function runFullAnalysis(
     // ============================================================
     // LAYER 4: Legacy Pipeline (scanner → risk → context → debate → decision)
     // ============================================================
-    const scanner = runScannerAgent(marketData, indicators)
-    const risk = runRiskAgent(marketData)
-    const context = runContextAgent(marketData, indicators)
+    const scanner = runScannerAgent(marketData, indicators, ihsgTrend)
+    if (hardFilterReason) {
+      scanner.status = 'REJECT'
+      scanner.warnings = [...scanner.warnings, hardFilterReason]
+      scanner.actionPlan = 'Skip entry until hard filters improve'
+    }
+
+    const risk = runRiskAgent(marketData, capital, riskPerTrade)
+    const context = runContextAgent(indicators, ihsgTrend, ihsgChange5d)
     const debate = runDebateAgent(scanner, risk, context)
     const decision = runDecisionAgent(scanner, risk, context, debate)
+    if (hardFilterReason) {
+      decision.finalDecision = 'REJECT'
+      decision.keyRisk = hardFilterReason
+      decision.executionNotes = 'No entry while hard filters fail'
+      decision.reasoning = `Rejected by hard filter: ${hardFilterReason}. Full market data and risk plan are still shown for review.`
+      decision.riskLevel = 'HIGH'
+      decision.urgency = 'monitor'
+    }
 
     // ============================================================
     // LAYER 5: Research Debate (enhanced)
@@ -172,17 +212,37 @@ export async function runFullAnalysis(
       liquidity: macro?.liquidityCondition ?? 'normal',
       volatility: macro?.volatilityState ?? 'normal',
     })
+    if (hardFilterReason) {
+      portfolioDecision.action = 'REJECTED'
+      portfolioDecision.conviction = Math.min(portfolioDecision.conviction, 25)
+      portfolioDecision.reasoning = [
+        hardFilterReason,
+        ...portfolioDecision.reasoning,
+      ]
+      portfolioDecision.recommendedRiskPercent = 0
+    }
 
     // ============================================================
     // LAYER 8: Final Score
     // ============================================================
-    const finalScore = calculateFinalScore(scanner, risk, context, debate, decision, analystReports, portfolioDecision)
+    const calculatedScore = calculateFinalScore(scanner, risk, context, debate, decision, analystReports, portfolioDecision)
+    const finalScore = hardFilterReason ? Math.min(45, calculatedScore) : calculatedScore
 
     return {
       ticker,
       timestamp: Date.now(),
       marketData,
       indicators,
+      dataHealth: {
+        ...dataHealth,
+        hasFundamental: Boolean(fundamental),
+        hasNews: (news?.totalArticles ?? 0) > 0,
+        issues: [
+          ...dataHealth.issues,
+          ...(fundamental ? [] : ['Fundamental data unavailable from Yahoo Finance']),
+          ...((news?.totalArticles ?? 0) > 0 ? [] : ['No fresh news found']),
+        ],
+      },
       fundamental,
       scanner,
       risk,
@@ -191,7 +251,7 @@ export async function runFullAnalysis(
       decision,
       finalScore,
       confidence: scanner.confidence,
-      status: scanner.status,
+      status: hardFilterReason ? 'REJECT' : scanner.status,
 
       // Phase 1 — Market Intelligence
       newsIntelligence: news ?? createEmptyNewsIntelligence(),
@@ -259,6 +319,8 @@ export async function fetchMarketDataWithIndicators(
   marketData: MarketData
   indicators: IndicatorSet
   fundamental: AnalysisPipeline['fundamental']
+  dataHealth: DataHealth
+  ihsgTrend: 'bullish' | 'sideways' | 'bearish' | 'unknown'
   ihsgChange5d?: number
   ihsgChange1d?: number
 }> {
@@ -316,6 +378,8 @@ export async function fetchMarketDataWithIndicators(
     marketData,
     indicators,
     fundamental: data.fundamental ?? null,
+    dataHealth: buildDataHealth(data),
+    ihsgTrend: data.meta.ihsgTrend ?? deriveIhsgTrend(data.meta.ihsgChange5d, data.meta.ihsgChange1d),
     ihsgChange5d: data.meta.ihsgChange5d,
     ihsgChange1d: data.meta.ihsgChange1d,
   }
@@ -326,7 +390,8 @@ export async function fetchMarketDataWithIndicators(
  */
 function runScannerAgent(
   marketData: MarketData,
-  indicators: IndicatorSet
+  indicators: IndicatorSet,
+  ihsgTrend: 'bullish' | 'sideways' | 'bearish' | 'unknown',
 ): ScannerResult {
   const setupScore = calculateSetupScore(
     {
@@ -347,7 +412,7 @@ function runScannerAgent(
       stochastic: indicators.stochastic.label,
       foreignFlow: '',
       brokerAccumulation: '',
-      ihsgTrend: indicators.trend,
+      ihsgTrend,
       sectorStrength: '',
       support: marketData.support.toString(),
       resistance: marketData.resistance.toString(),
@@ -407,7 +472,9 @@ function runScannerAgent(
  * Run risk agent (deterministic, no AI required)
  */
 function runRiskAgent(
-  marketData: MarketData
+  marketData: MarketData,
+  capital: number,
+  riskPerTrade: number,
 ): RiskResult {
   const riskCalc = computeRisk({
     ticker: marketData.ticker,
@@ -415,8 +482,8 @@ function runRiskAgent(
     support: marketData.support.toString(),
     resistance: marketData.resistance.toString(),
     atr: marketData.atr.toString(),
-    capital: '100000000',
-    riskPerTrade: '1',
+    capital: capital.toString(),
+    riskPerTrade: riskPerTrade.toString(),
   })
 
   if (!riskCalc) {
@@ -430,7 +497,8 @@ function runRiskAgent(
     verdict = 'ADJUST'
   }
 
-  let reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} meets minimum requirements. Position sized for 1% risk.`
+  const riskBudget = (capital * riskPerTrade) / 100
+  let reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} meets minimum requirements. Position sized for ${riskPerTrade.toFixed(2)}% risk on ${marketData.ticker}.`
   if (verdict === 'REJECT') {
     reasoning = `RR ${riskCalc.riskReward1.toFixed(2)} below minimum 2.0. Consider adjusting entry or waiting for better setup.`
   } else if (verdict === 'ADJUST') {
@@ -438,6 +506,13 @@ function runRiskAgent(
   }
 
   return {
+    ticker: marketData.ticker,
+    currentPrice: marketData.currentPrice,
+    support: marketData.support,
+    resistance: marketData.resistance,
+    capital,
+    riskPerTrade,
+    riskBudget,
     entryZone: `${riskCalc.entry.toFixed(0)} - ${(riskCalc.entry * 1.01).toFixed(0)}`,
     stopLoss: riskCalc.stopLoss.toFixed(0),
     stopReason: 'Below support with ATR buffer',
@@ -462,16 +537,17 @@ function runRiskAgent(
  * Run context agent (deterministic, no AI required)
  */
 function runContextAgent(
-  marketData: MarketData,
-  indicators: IndicatorSet
+  indicators: IndicatorSet,
+  ihsgTrend: 'bullish' | 'sideways' | 'bearish' | 'unknown',
+  ihsgChange5d?: number,
 ): ContextResult {
   let marketRegime: ContextResult['marketRegime'] = 'NORMAL'
   let riskStance: ContextResult['riskStance'] = 'NEUTRAL'
 
-  if (indicators.trend === 'bullish' && indicators.volumeRatio > 1.5) {
+  if (ihsgTrend === 'bullish' && (ihsgChange5d ?? 0) > 0) {
     marketRegime = 'AGGRESSIVE'
     riskStance = 'RISK-ON'
-  } else if (indicators.trend === 'bearish') {
+  } else if (ihsgTrend === 'bearish' || (ihsgChange5d ?? 0) < -1) {
     marketRegime = 'DEFENSIVE'
     riskStance = 'RISK-OFF'
   }
@@ -500,7 +576,66 @@ function runContextAgent(
     flowRead: 'Monitor foreign flow',
     keyRisks,
     strategyBias,
-    reasoning: `Market regime ${marketRegime} based on trend ${indicators.trend} and volume ${indicators.volumeRatio.toFixed(2)}x. Risk stance: ${riskStance}.`,
+    reasoning: `Market regime ${marketRegime} based on IHSG trend ${ihsgTrend}, IHSG 5d ${ihsgChange5d != null ? ihsgChange5d.toFixed(2) + '%' : 'N/A'}, stock trend ${indicators.trend}, and volume ${indicators.volumeRatio.toFixed(2)}x. Risk stance: ${riskStance}.`,
+  }
+}
+
+type QuotePayload = {
+  scanner?: Record<string, unknown>
+  meta?: Record<string, unknown>
+  fundamental?: unknown
+}
+
+function buildDataHealth(data: QuotePayload): DataHealth {
+  const scanner = data.scanner ?? {}
+  const meta = data.meta ?? {}
+  const issues: string[] = []
+  const numericFields = [
+    ['price', scanner.currentPrice],
+    ['volume', scanner.todayVolume],
+    ['avg volume', scanner.avgVolume20d],
+    ['support', scanner.support],
+    ['resistance', scanner.resistance],
+    ['EMA20', scanner.ema20],
+    ['RSI', scanner.rsi],
+  ] as const
+
+  for (const [label, raw] of numericFields) {
+    const value = Number(raw)
+    if (!Number.isFinite(value) || value <= 0) {
+      issues.push(`${label} missing or zero`)
+    }
+  }
+
+  const barsCount = Number(meta.barsCount ?? 0)
+  if (barsCount < 60) issues.push(`Only ${barsCount} price bars available`)
+  if (!meta.lastBarDate) issues.push('Last bar date unavailable')
+
+  const lastUpdate = typeof meta.lastBarDate === 'string' ? meta.lastBarDate : ''
+  const lastTime = lastUpdate ? new Date(lastUpdate).getTime() : NaN
+  const ageDays = Number.isFinite(lastTime)
+    ? (Date.now() - lastTime) / (24 * 60 * 60 * 1000)
+    : Infinity
+  if (ageDays > 7) issues.push(`Price data stale by ${Math.floor(ageDays)} days`)
+
+  let score = 100
+  score -= Math.max(0, 60 - barsCount)
+  score -= issues.length * 12
+  if (!data?.fundamental) score -= 8
+  score = Math.max(0, Math.min(100, Math.round(score)))
+
+  const status: DataHealth['status'] =
+    score >= 80 ? 'GOOD' : score >= 55 ? 'DEGRADED' : score >= 30 ? 'STALE' : 'BAD'
+
+  return {
+    status,
+    score,
+    lastUpdate: lastUpdate || 'unknown',
+    barsCount,
+    issues,
+    source: meta.source === 'cache' ? 'cache' : 'live',
+    hasFundamental: Boolean(data.fundamental),
+    hasNews: false,
   }
 }
 
@@ -699,118 +834,6 @@ function calculateFinalScore(
 }
 
 /**
- * Create rejected pipeline result
- */
-function createRejectedPipeline(
-  ticker: string,
-  marketData: MarketData,
-  indicators: IndicatorSet,
-  reason: string
-): AnalysisPipeline {
-  const emptyAnalyst: AnalystReport = {
-    agent: 'System',
-    bias: 'bearish',
-    confidence: 100,
-    score: 0,
-    summary: `Rejected: ${reason}`,
-    signals: [],
-    risks: [reason],
-  }
-
-  return {
-    ticker,
-    timestamp: Date.now(),
-    marketData,
-    indicators,
-    fundamental: null,
-    scanner: {
-      setupType: 'no_setup',
-      setupScore: 0,
-      confidence: 'LOW',
-      status: 'REJECT',
-      keyReads: [],
-      warnings: [reason],
-      actionPlan: 'Skip this setup',
-      reasoning: `Rejected by hard filters: ${reason}`,
-    },
-    risk: {
-      entryZone: 'N/A',
-      stopLoss: 'N/A',
-      stopReason: 'N/A',
-      tp1: 'N/A',
-      tp1Reason: 'N/A',
-      tp2: 'N/A',
-      tp2Reason: 'N/A',
-      rr1: 0,
-      rr2: 0,
-      positionSize: { lots: 0, shares: 0, maxLoss: 0, positionValue: 0 },
-      verdict: 'REJECT',
-      reasoning: 'Setup rejected by hard filters',
-    },
-    context: {
-      marketRegime: 'DEFENSIVE',
-      riskStance: 'RISK-OFF',
-      sectorTake: 'N/A',
-      flowRead: 'N/A',
-      keyRisks: [],
-      strategyBias: 'Avoid',
-      reasoning: 'Setup rejected',
-    },
-    debate: {
-      bullishArguments: [],
-      bearishArguments: [reason],
-      consensus: 'BEARISH',
-      confidence: 0,
-      keyFactors: [],
-      reasoning: 'Setup rejected',
-    },
-    decision: {
-      finalDecision: 'REJECT',
-      confidenceScore: 0,
-      successProbability: 0,
-      keyEdge: 'N/A',
-      keyRisk: reason,
-      bullishScenario: 'N/A',
-      bearishScenario: reason,
-      executionNotes: 'Skip this setup',
-      reasoning: `Rejected: ${reason}`,
-      riskLevel: 'HIGH',
-      urgency: 'monitor',
-    },
-    finalScore: 0,
-    confidence: 'LOW',
-    status: 'REJECT',
-    newsIntelligence: createEmptyNewsIntelligence(),
-    socialSentiment: createEmptySocialSentiment(),
-    macroContext: createEmptyMacroContext(),
-    analystReports: [emptyAnalyst],
-    debateMatrix: {
-      bullCase: [],
-      bearCase: [reason],
-      consensusScore: 10,
-      conflictScore: 0,
-      dominantBias: 'bearish',
-    },
-    thesis: {
-      title: `${ticker.replace('.JK', '')} — Rejected`,
-      executiveSummary: `Setup rejected: ${reason}`,
-      technicalThesis: [],
-      fundamentalThesis: [],
-      sentimentThesis: [],
-      opportunities: [],
-      risks: [reason],
-      conviction: 0,
-    },
-    portfolioDecision: {
-      action: 'REJECTED',
-      conviction: 0,
-      reasoning: [reason],
-      recommendedRiskPercent: 0,
-    },
-  }
-}
-
-/**
  * Format currency for display
  */
 function formatCurrency(value: number): string {
@@ -854,4 +877,15 @@ function createEmptyMacroContext() {
     globalCue: 'neutral' as const,
     marketBreadth: 'No data available',
   }
+}
+
+function deriveIhsgTrend(
+  ihsgChange5d?: number,
+  ihsgChange1d?: number,
+): 'bullish' | 'sideways' | 'bearish' | 'unknown' {
+  const change = ihsgChange5d ?? ihsgChange1d
+  if (change == null || !Number.isFinite(change)) return 'unknown'
+  if (change > 0) return 'bullish'
+  if (change < -1) return 'bearish'
+  return 'sideways'
 }

@@ -22,6 +22,8 @@ const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey", "ripHistorical"],
 });
 
+const quoteCache = new Map<string, QuoteResult>();
+
 interface ChartBar {
   date: Date;
   open: number;
@@ -75,29 +77,31 @@ async function fetchBars(symbol: string, days = 260): Promise<Bar[]> {
   return toBars(quotes);
 }
 
+function rawNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>).raw;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
 // Tambahan: fetch fundamental dari Yahoo Finance
 async function fetchFundamental(ticker: string) {
-  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}.JK?modules=summaryDetail,defaultKeyStatistics,financialData`;
-  
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' }
+  const symbol = normaliseTicker(ticker);
+  const result = await yahooFinance.quoteSummary(symbol, {
+    modules: ["summaryDetail", "defaultKeyStatistics", "financialData"],
   });
-  
-  if (!res.ok) return null;
-  const json = await res.json();
-  const result = json?.quoteSummary?.result?.[0];
   if (!result) return null;
 
   return {
-    per: result.summaryDetail?.trailingPE?.raw ?? null,
-    pbv: result.summaryDetail?.priceToBook?.raw ?? null,
-    dividendYield: result.summaryDetail?.dividendYield?.raw ?? null,
-    marketCap: result.summaryDetail?.marketCap?.raw ?? null,
-    roe: result.financialData?.returnOnEquity?.raw ?? null,
-    der: result.financialData?.debtToEquity?.raw ?? null,
-    revenueGrowth: result.financialData?.revenueGrowth?.raw ?? null,
-    earningsGrowth: result.financialData?.earningsGrowth?.raw ?? null,
-    eps: result.defaultKeyStatistics?.trailingEps?.raw ?? null,
+    per: rawNumber(result.summaryDetail?.trailingPE) ?? rawNumber(result.defaultKeyStatistics?.trailingPE),
+    pbv: rawNumber(result.defaultKeyStatistics?.priceToBook) ?? rawNumber(result.summaryDetail?.priceToBook),
+    dividendYield: rawNumber(result.summaryDetail?.dividendYield),
+    marketCap: rawNumber(result.summaryDetail?.marketCap) ?? rawNumber(result.price?.marketCap),
+    roe: rawNumber(result.financialData?.returnOnEquity),
+    der: rawNumber(result.financialData?.debtToEquity),
+    revenueGrowth: rawNumber(result.financialData?.revenueGrowth),
+    earningsGrowth: rawNumber(result.financialData?.earningsGrowth),
+    eps: rawNumber(result.defaultKeyStatistics?.trailingEps),
   };
 }
 
@@ -214,14 +218,36 @@ export async function GET(request: Request) {
         ihsgChange1d: ihsg.change1d,
         ihsgChange5d: ihsg.change5d,
         volRatio,
+        source: "live",
       },
       fundamental, // tambahan fundamental
     };
+
+    quoteCache.set(symbol, result);
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
+    const cached = quoteCache.get(symbol);
+    if (cached) {
+      return NextResponse.json(
+        {
+          ...cached,
+          meta: {
+            ...cached.meta,
+            source: "cache",
+          },
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Data-Warning": "Yahoo Finance failed; served last cached quote",
+          },
+        },
+      );
+    }
+
     const message = err instanceof Error ? err.message : "Unknown error";
     const isNotFound = /not found|no data|404/i.test(message);
     return NextResponse.json(

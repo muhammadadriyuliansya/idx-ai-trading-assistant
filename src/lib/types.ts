@@ -141,6 +141,7 @@ export interface QuoteResult {
     ihsgChange1d?: number;
     ihsgChange5d?: number;
     volRatio: number;
+    source?: "live" | "cache";
   };
   fundamental?: {
     per: number | null;

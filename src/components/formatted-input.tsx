@@ -41,11 +41,6 @@ export function FormattedNumberInput({
     return clean.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   };
 
-  // Get the raw number (remove dots)
-  const getRawValue = (formatted: string): string => {
-    return formatted.replace(/\./g, "");
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
     // Allow only digits

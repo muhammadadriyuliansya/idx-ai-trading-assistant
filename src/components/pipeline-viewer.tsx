@@ -9,8 +9,6 @@ import { formatCurrency, formatNumber } from "@/lib/utils";
 import type { AnalysisPipeline } from "@/pipeline/types";
 import {
   exportFullBrief,
-  exportMarkdownReport,
-  exportJsonReport,
   exportAIReadyPrompt,
 } from "@/lib/export";
 import {
@@ -35,7 +33,6 @@ import {
 interface PipelineViewerProps {
   pipeline: AnalysisPipeline;
   onAnalyzeWithAI?: (prompt: string) => void;
-  onExport?: (type: "brief" | "markdown" | "json" | "ai-prompt") => void;
 }
 
 function formatNullable(value: number | null | undefined, digits = 2): string {
@@ -225,31 +222,15 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
   const [exportText, setExportText] = useState("");
   const [exportTitle, setExportTitle] = useState("");
 
-  const handleExport = (type: "markdown" | "json" | "ai-prompt") => {
-    let text = "";
-    let title = "";
-    switch (type) {
-      case "markdown":
-        text = exportMarkdownReport(pipeline);
-        title = "Markdown Report";
-        break;
-      case "json":
-        text = exportJsonReport(pipeline);
-        title = "JSON Report";
-        break;
-      case "ai-prompt":
-        text = exportAIReadyPrompt(pipeline);
-        title = "AI-Ready Prompt";
-        break;
-    }
-    setExportText(text);
-    setExportTitle(title);
+  const handleExportBrief = () => {
+    setExportText(exportFullBrief(pipeline));
+    setExportTitle("Institutional Brief");
     setShowExportModal(true);
   };
 
-  const handleCopyBrief = () => {
-    const text = exportFullBrief(pipeline);
-    navigator.clipboard.writeText(text);
+  const handleCopyBrief = async () => {
+    if (!pipeline) return;
+    await navigator.clipboard.writeText(exportFullBrief(pipeline));
   };
 
   const handleAnalyzeWithAI = () => {
@@ -730,12 +711,18 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
       {/* RISK MANAGEMENT */}
       {/* ═══════════════════════════════════════════════ */}
       <CollapsibleSection
-        title="Risk Management"
+        title={`Risk Management — ${risk.ticker.replace(".JK", "")}`}
         icon={<Shield className="h-4 w-4" />}
         badge={risk.verdict}
         badgeTone={risk.verdict === "ACCEPT" ? "emerald" : risk.verdict === "ADJUST" ? "amber" : "red"}
         defaultOpen={false}
       >
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          <Metric label="Ticker Price" value={formatCurrency(risk.currentPrice)} />
+          <Metric label="Support" value={formatCurrency(risk.support)} />
+          <Metric label="Resistance" value={formatCurrency(risk.resistance)} />
+          <Metric label="Risk Budget" value={formatCurrency(risk.riskBudget)} />
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
           <Metric label="Entry Zone" value={risk.entryZone} />
           <Metric label="Stop Loss" value={formatCurrency(Number(risk.stopLoss))} />
@@ -749,6 +736,8 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
           <Metric label="Max Loss" value={formatCurrency(risk.positionSize.maxLoss)} />
         </div>
         <div className="text-xs text-zinc-400 mt-1">
+          <span className="text-zinc-500">Sizing: </span>
+          {formatCurrency(risk.capital)} capital x {risk.riskPerTrade.toFixed(2)}% risk.{" "}
           <span className="text-zinc-500">Stop: </span>{risk.stopReason}
         </div>
       </CollapsibleSection>
@@ -756,12 +745,14 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
       {/* ═══════════════════════════════════════════════ */}
       {/* FUNDAMENTAL */}
       {/* ═══════════════════════════════════════════════ */}
-      {fundamental && (
-        <CollapsibleSection
-          title="Fundamental Analysis"
-          icon={<BarChart3 className="h-4 w-4" />}
-          defaultOpen={false}
-        >
+      <CollapsibleSection
+        title="Fundamental Context"
+        icon={<BarChart3 className="h-4 w-4" />}
+        badge={fundamental ? "Yahoo Finance" : "Unavailable"}
+        badgeTone={fundamental ? "blue" : "amber"}
+        defaultOpen={false}
+      >
+        {fundamental ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <Metric label="PER (Trailing)" value={formatNullable(fundamental.per) + "x"} />
             <Metric label="PBV" value={formatNullable(fundamental.pbv) + "x"} />
@@ -770,8 +761,12 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
             <Metric label="EPS Growth" value={fmtPct(fundamental.earningsGrowth)} />
             <Metric label="Div Yield" value={fmtPct(fundamental.dividendYield)} />
           </div>
-        </CollapsibleSection>
-      )}
+        ) : (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">
+            Fundamental data is not available from Yahoo Finance for this ticker. The pipeline keeps this as a data-health warning and does not invent valuation numbers.
+          </div>
+        )}
+      </CollapsibleSection>
 
       {/* ═══════════════════════════════════════════════ */}
       {/* DECISION DETAIL */}
@@ -807,16 +802,10 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
           <Copy className="h-3 w-3" /> Copy Brief
         </button>
         <button
-          onClick={() => handleExport("markdown")}
+          onClick={handleExportBrief}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition-colors"
         >
-          <Download className="h-3 w-3" /> Export Markdown
-        </button>
-        <button
-          onClick={() => handleExport("json")}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-medium transition-colors"
-        >
-          <Download className="h-3 w-3" /> Export JSON
+          <Download className="h-3 w-3" /> Export Brief
         </button>
         {onAnalyzeWithAI && (
           <button

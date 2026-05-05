@@ -94,211 +94,347 @@ export function exportToBrief(data: ExportData): string {
 }
 
 // ============================================================================
-// INSTITUTIONAL EXPORT — Full Brief (Plain Text Format)
+// INSTITUTIONAL EXPORT - Full Brief (Plain Text Format)
 // ============================================================================
 
-export function exportFullBrief(pipeline: AnalysisPipeline): string {
-  const now = new Date().toLocaleDateString("en-GB");
-  const separator = "=".repeat(50);
-  const dash = "-".repeat(50);
+type BriefBias = "BULLISH" | "BEARISH" | "NEUTRAL";
 
-  const lines: string[] = [];
+function formatNumber(value: number | null | undefined, digits = 2): string {
+  if (value == null || !Number.isFinite(value)) return "N/A";
+  return value.toFixed(digits);
+}
 
-  // Header
-  lines.push(separator);
-  lines.push(`📊 IDX INSTITUTIONAL BRIEF: ${pipeline.ticker}`);
-  lines.push(`Generated: ${now}`);
-  lines.push(separator);
-  lines.push("");
+function formatPercent(value: number | null | undefined, digits = 1): string {
+  if (value == null || !Number.isFinite(value)) return "N/A";
+  const percent = Math.abs(value) <= 1 ? value * 100 : value;
+  return `${percent.toFixed(digits)}%`;
+}
 
-  // FINAL DECISION
-  lines.push("FINAL DECISION");
-  lines.push(`Action     : ${pipeline.decision.finalDecision}`);
-  lines.push(`Score      : ${pipeline.finalScore} / 100`);
-  lines.push(`Confidence : ${pipeline.decision.successProbability >= 70 ? "HIGH" : pipeline.decision.successProbability >= 40 ? "MEDIUM" : "LOW"}`);
-  lines.push(`Regime     : ${pipeline.context.marketRegime}`);
-  lines.push("");
+function formatCurrency(value: number | string | null | undefined): string {
+  const numeric = typeof value === "string" ? Number(value) : value;
+  if (numeric == null || !Number.isFinite(numeric)) return String(value ?? "N/A");
+  return `Rp ${numeric.toLocaleString("id-ID", { maximumFractionDigits: 0 })}`;
+}
 
-  // EXECUTIVE SUMMARY
-  lines.push(dash);
-  lines.push("🧠 EXECUTIVE SUMMARY");
-  if (pipeline.thesis && pipeline.thesis.executiveSummary) {
-    lines.push(pipeline.thesis.executiveSummary);
+function dedupeBullets(items: Array<string | null | undefined>, fallback: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const item of [...items, ...fallback]) {
+    const clean = item?.trim();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    result.push(clean);
+    if (result.length >= 4) break;
+  }
+
+  while (result.length < 2) {
+    result.push("Data belum cukup kuat, sehingga interpretasi tetap perlu dibuat konservatif.");
+  }
+
+  return result;
+}
+
+function getDominantBias(score: number): BriefBias {
+  if (score < 40) return "BEARISH";
+  if (score > 60) return "BULLISH";
+  return "NEUTRAL";
+}
+
+function buildTechnicalBullets(pipeline: AnalysisPipeline): string[] {
+  const { indicators, marketData, scanner } = pipeline;
+  const bullets: string[] = [];
+
+  if (indicators.trend === "bearish") {
+    bullets.push("Struktur harga masih menunjukkan tren turun, sehingga rebound perlu diperlakukan sebagai counter-trend sampai ada reversal yang jelas.");
+  } else if (indicators.trend === "bullish") {
+    bullets.push("Struktur harga masih konstruktif dan mendukung skenario continuation selama support utama tidak ditembus.");
   } else {
-    const decision = pipeline.decision.finalDecision;
-    if (decision === "REJECT") {
-      lines.push("Setup tidak layak untuk entry. Struktur harga masih dalam tren turun dengan momentum lemah dan tidak ada katalis kuat dari sisi fundamental maupun sentimen untuk membalik arah dalam waktu dekat.");
+    bullets.push("Harga bergerak sideways, sehingga entry sebaiknya menunggu breakout atau pullback yang lebih bersih.");
+  }
+
+  if (indicators.rsi < 40) {
+    bullets.push(`Momentum masih lemah dengan RSI ${formatNumber(indicators.rsi, 1)}, belum cukup untuk mengonfirmasi pembalikan arah.`);
+  } else if (indicators.rsi > 70) {
+    bullets.push(`RSI ${formatNumber(indicators.rsi, 1)} berada di area panas, sehingga upside harus dibaca bersama risiko pullback.`);
+  } else {
+    bullets.push(`RSI ${formatNumber(indicators.rsi, 1)} berada di zona netral, belum memberi sinyal ekstrem untuk entry agresif.`);
+  }
+
+  if (indicators.volumeRatio < 1) {
+    bullets.push(`Volume hanya ${formatNumber(indicators.volumeRatio, 2)}x rata-rata, jadi buyer belum menunjukkan partisipasi kuat.`);
+  } else {
+    bullets.push(`Volume ${formatNumber(indicators.volumeRatio, 2)}x rata-rata memberi konfirmasi partisipasi yang lebih baik, tetapi tetap perlu validasi price action.`);
+  }
+
+  if (marketData.currentPrice < indicators.ema20 && marketData.currentPrice < indicators.ema50) {
+    bullets.push("Harga masih di bawah EMA20 dan EMA50, tanda buyer belum mengambil kontrol jangka pendek.");
+  } else if (marketData.currentPrice > indicators.ema20 && marketData.currentPrice > indicators.ema50) {
+    bullets.push("Harga berada di atas EMA20 dan EMA50, sehingga struktur jangka pendek lebih mendukung skenario follow-through.");
+  }
+
+  return dedupeBullets(bullets, [
+    `Scanner membaca setup ${scanner.setupType} dengan status ${scanner.status} dan skor ${scanner.setupScore}/100.`,
+    scanner.reasoning,
+  ]);
+}
+
+function buildFundamentalBullets(pipeline: AnalysisPipeline): { bullets: string[]; bias: BriefBias } {
+  const { fundamental, analystReports } = pipeline;
+  const report = analystReports.find((item) => item.agent === "fundamental-analyst");
+  const bullets: string[] = [];
+  let score = 0;
+
+  if (!fundamental) {
+    return {
+      bullets: [
+        "Data fundamental tidak tersedia, jadi brief tidak menaruh bobot besar pada valuasi atau kualitas laba.",
+        "Keputusan lebih banyak ditentukan oleh teknikal, risiko, market regime, dan sentimen yang tersedia.",
+      ],
+      bias: "NEUTRAL",
+    };
+  }
+
+  if (fundamental.per != null) {
+    if (fundamental.per > 25) {
+      bullets.push(`PER ${formatNumber(fundamental.per, 1)}x relatif mahal dan membutuhkan growth kuat untuk membenarkan upside.`);
+      score -= 1;
+    } else if (fundamental.per > 0 && fundamental.per < 10) {
+      bullets.push(`PER ${formatNumber(fundamental.per, 1)}x memberi bantalan valuasi karena saham terlihat relatif murah.`);
+      score += 1;
     } else {
-      lines.push(`${pipeline.ticker} menunjukkan setup trading yang valid dengan multiple konfirmasi dari analisis teknikal, fundamental, dan sentimen.`);
+      bullets.push(`PER ${formatNumber(fundamental.per, 1)}x berada di area wajar, sehingga valuasi bukan katalis utama.`);
     }
   }
-  lines.push("");
 
-  // TECHNICAL THESIS
-  lines.push(dash);
-  lines.push("📉 TECHNICAL THESIS");
-  if (pipeline.thesis && pipeline.thesis.technicalThesis.length > 0) {
-    for (const t of pipeline.thesis.technicalThesis) {
-      lines.push(`- ${t}`);
+  if (fundamental.roe != null) {
+    const roe = Math.abs(fundamental.roe) <= 1 ? fundamental.roe * 100 : fundamental.roe;
+    if (roe >= 15) {
+      bullets.push(`ROE ${formatNumber(roe, 1)}% menunjukkan profitabilitas kuat dan kualitas bisnis yang lebih defensif.`);
+      score += 1;
+    } else {
+      bullets.push(`ROE ${formatNumber(roe, 1)}% belum cukup kuat untuk menjadi penopang utama thesis bullish.`);
+      score -= 1;
     }
-  } else {
-    const ind = pipeline.indicators;
-    lines.push(`- Trend: ${ind?.trend ?? "-"}`);
-    lines.push(`- Momentum: ${ind?.rsi != null ? (ind.rsi > 50 ? "kuat" : ind.rsi > 30 ? "netral" : "lemah") : "-"} (RSI: ${ind?.rsi?.toFixed(1) ?? "-"})`);
-    lines.push(`- Volume: ${ind?.volumeRatio != null ? (ind.volumeRatio > 1.5 ? "tinggi" : ind.volumeRatio > 1 ? "moderat" : "rendah") : "-"}`);
-    lines.push(`- Price structure: ${ind?.trend === "bullish" ? "higher high & higher low" : ind?.trend === "bearish" ? "lower high & lower low" : "-"}`);
   }
-  lines.push("");
-  lines.push("Kesimpulan:");
-  if (pipeline.scanner?.setupScore != null && pipeline.scanner.setupScore >= 70) {
-    lines.push("Terdapat sinyal valid untuk entry.");
-  } else {
-    lines.push("Tidak ada sinyal valid untuk entry.");
-  }
-  lines.push("");
 
-  // FUNDAMENTAL CONTEXT
-  lines.push(dash);
-  lines.push("🏦 FUNDAMENTAL CONTEXT");
-  const fundamentalReport = pipeline.analystReports?.find(r => r.agent === "fundamental-analyst");
-  if (fundamentalReport) {
-    lines.push(`- ${fundamentalReport.summary}`);
-  } else {
-    lines.push("- Tidak ada faktor fundamental kuat yang mendukung upside");
-    lines.push("- Tidak ada katalis signifikan dalam waktu dekat");
-  }
-  lines.push("");
-  const fundBias = fundamentalReport?.bias ?? "neutral";
-  lines.push(`Bias: ${fundBias.toUpperCase() === "BULLISH" ? "Bullish" : fundBias.toUpperCase() === "BEARISH" ? "Bearish" : "Neutral to Weak"}`);
-  lines.push("");
-
-  // NEWS INTELLIGENCE
-  lines.push(dash);
-  lines.push("📰 NEWS INTELLIGENCE");
-  if (pipeline.newsIntelligence && pipeline.newsIntelligence.totalArticles > 0) {
-    lines.push(`- ${pipeline.newsIntelligence.totalArticles} artikel ditemukan dengan sentimen ${pipeline.newsIntelligence.dominantSentiment}`);
-    if (pipeline.newsIntelligence.keyTopics.length > 0) {
-      lines.push(`- Topik: ${pipeline.newsIntelligence.keyTopics.slice(0, 3).join(", ")}`);
+  const growth = fundamental.earningsGrowth ?? fundamental.revenueGrowth;
+  if (growth != null) {
+    const growthPct = Math.abs(growth) <= 1 ? growth * 100 : growth;
+    if (growthPct < 5) {
+      bullets.push(`Growth ${formatNumber(growthPct, 1)}% masih terbatas, sehingga upside perlu dibantu katalis lain.`);
+      score -= 1;
+    } else {
+      bullets.push(`Growth ${formatNumber(growthPct, 1)}% memberi dukungan terhadap ekspektasi perbaikan laba.`);
+      score += 1;
     }
+  }
+
+  const bias: BriefBias = report?.bias === "bullish" || score > 0 ? "BULLISH" : report?.bias === "bearish" || score < 0 ? "BEARISH" : "NEUTRAL";
+
+  return {
+    bullets: dedupeBullets(bullets, [
+      ...(report?.summary ? [report.summary] : []),
+      ...(report?.signals ?? []),
+      ...(report?.risks ?? []),
+      "Fundamental tidak memberi sinyal ekstrem; eksekusi tetap bergantung pada kualitas setup dan risiko.",
+    ]),
+    bias,
+  };
+}
+
+function buildNewsBullets(pipeline: AnalysisPipeline): { bullets: string[]; bias: BriefBias } {
+  const news = pipeline.newsIntelligence;
+  const bullets: string[] = [];
+
+  if (news.totalArticles === 0 || news.recentHeadlines.length === 0) {
+    bullets.push("Tidak ada katalis berita signifikan yang terdeteksi dari feed terbaru.");
+    bullets.push("Tanpa headline pendukung, pergerakan harga harus lebih banyak divalidasi oleh volume dan struktur teknikal.");
   } else {
-    lines.push("- Tidak ditemukan berita signifikan yang mendukung pergerakan bullish");
-    lines.push("- Tidak ada katalis jangka pendek");
+    bullets.push(`${news.totalArticles} artikel terdeteksi dengan sentimen dominan ${news.dominantSentiment}.`);
+    news.recentHeadlines.slice(0, 2).forEach((headline) => {
+      bullets.push(`Highlight berita: ${headline}`);
+    });
   }
-  const newsBias = pipeline.newsIntelligence?.dominantSentiment ?? "neutral";
-  lines.push("");
-  lines.push(`Bias: ${newsBias.charAt(0).toUpperCase() + newsBias.slice(1)}`);
-  lines.push("");
 
-  // SOCIAL SENTIMENT
-  lines.push(dash);
-  lines.push("💬 SOCIAL SENTIMENT");
-  if (pipeline.macroContext?.socialSentiment) {
-    lines.push(`- Sentimen: ${pipeline.macroContext.socialSentiment.bias}`);
-    lines.push(`- Skor: ${pipeline.macroContext.socialSentiment.score.toFixed(2)}`);
+  let bias: BriefBias = "NEUTRAL";
+  if (news.sentimentScore > 0 || news.dominantSentiment === "positive") bias = "BULLISH";
+  if (news.sentimentScore < 0 || news.dominantSentiment === "negative") bias = "BEARISH";
+
+  return {
+    bullets: dedupeBullets(bullets, ["Berita belum memberi edge mandiri dan tetap harus dibaca bersama price action."]),
+    bias,
+  };
+}
+
+function buildSocialBullets(pipeline: AnalysisPipeline): { bullets: string[]; bias: BriefBias } {
+  const social = pipeline.socialSentiment;
+  const bullets: string[] = [];
+
+  if (social.score > 0) {
+    bullets.push(`Sentimen sosial cenderung positif dengan skor ${formatNumber(social.score, 2)}.`);
+  } else if (social.score < 0) {
+    bullets.push(`Sentimen sosial cenderung negatif dengan skor ${formatNumber(social.score, 2)}.`);
   } else {
-    lines.push("- Aktivitas rendah");
-    lines.push("- Tidak ada peningkatan minat retail");
+    bullets.push("Sentimen sosial masih netral dan belum memberi dorongan arah yang jelas.");
   }
-  lines.push("");
-  lines.push("Bias: Neutral / Weak");
-  lines.push("");
 
-  // BULL vs BEAR ANALYSIS
-  lines.push(dash);
-  lines.push("⚖️ BULL vs BEAR ANALYSIS");
-  lines.push("");
-  lines.push("Bull Case:");
-  if (pipeline.debateMatrix?.bullCase && pipeline.debateMatrix.bullCase.length > 0) {
-    for (const b of pipeline.debateMatrix.bullCase.slice(0, 3)) {
-      lines.push(`- ${b}`);
-    }
-  } else {
-    lines.push("- Potensi technical bounce minor di area support");
-  }
-  lines.push("");
-  lines.push("Bear Case:");
-  if (pipeline.debateMatrix?.bearCase && pipeline.debateMatrix.bearCase.length > 0) {
-    for (const b of pipeline.debateMatrix.bearCase.slice(0, 3)) {
-      lines.push(`- ${b}`);
-    }
-  } else {
-    lines.push("- Trend utama masih turun");
-    lines.push("- Tidak ada volume masuk");
-    lines.push("- Tidak ada katalis");
-  }
-  lines.push("");
-  const dominantBias = pipeline.debateMatrix?.dominantBias ?? (pipeline.scanner?.setupScore >= 70 ? "bullish" : "bearish");
-  lines.push(`Dominant Bias: ${dominantBias.toUpperCase()}`);
-  lines.push("");
+  bullets.push(`Momentum percakapan ${social.momentum} dengan ${social.mentions} mentions; ini konfirmasi sekunder, bukan sinyal entry utama.`);
 
-  // RISK ANALYSIS
-  lines.push(dash);
-  lines.push("⚠️ RISK ANALYSIS");
-  lines.push(`Entry    : ${pipeline.risk.entryZone}`);
-  lines.push(`Stop Loss: ${pipeline.risk.stopLoss}`);
-  lines.push(`TP1      : ${pipeline.risk.tp1}`);
-  lines.push(`TP2      : ${pipeline.risk.tp2}`);
-  lines.push("");
-  lines.push("Risk Reward:");
-  lines.push(`- TP1: 1 : ${pipeline.risk.rr1.toFixed(2)}`);
-  lines.push(`- TP2: 1 : ${pipeline.risk.rr2.toFixed(2)}`);
-  lines.push("");
-  lines.push("Masalah utama:");
-  if (pipeline.risk.rr1 < 1.5) {
-    lines.push("- RR terlalu rendah (minimal 1.5)");
+  if (social.topKeywords.length > 0) {
+    bullets.push(`Keyword dominan: ${social.topKeywords.slice(0, 3).join(", ")}.`);
   }
-  if (pipeline.scanner?.setupScore != null && pipeline.scanner.setupScore < 70) {
-    lines.push("- Probabilitas hit TP rendah");
-    lines.push("- Setup quality buruk");
+
+  return {
+    bullets: dedupeBullets(bullets, ["Belum terlihat tema retail yang cukup kuat untuk mengubah keputusan utama."]),
+    bias: social.score > 0 ? "BULLISH" : social.score < 0 ? "BEARISH" : "NEUTRAL",
+  };
+}
+
+function buildExecutiveSummary(pipeline: AnalysisPipeline, dominantBias: BriefBias): string {
+  const { indicators, risk, decision, finalScore } = pipeline;
+  const weakTrend = indicators.trend === "bearish";
+  const weakMomentum = indicators.rsi < 40;
+  const weakVolume = indicators.volumeRatio < 1;
+  const rejected = decision.finalDecision === "REJECT" || pipeline.portfolioDecision.action === "REJECTED";
+
+  if (rejected && weakTrend) {
+    return `Setup ${pipeline.ticker} belum layak entry. Skor ${finalScore}/100 berada pada bias ${dominantBias}, trend masih bearish, momentum lemah, dan volume belum cukup mendukung reversal.`;
   }
-  lines.push("");
 
-  // PORTFOLIO DECISION
-  lines.push(dash);
-  lines.push("📊 PORTFOLIO DECISION");
-  lines.push(`Status: ${pipeline.portfolioDecision?.action ?? pipeline.decision.finalDecision}`);
-  lines.push("");
-  lines.push("Alasan:");
-  if (pipeline.portfolioDecision?.reasoning && pipeline.portfolioDecision.reasoning.length > 0) {
-    for (const r of pipeline.portfolioDecision.reasoning.slice(0, 3)) {
-      lines.push(`- ${r}`);
-    }
-  } else {
-    lines.push(`- Setup score ${pipeline.scanner?.setupScore ?? pipeline.finalScore}/100`);
-    lines.push("- Trend tidak mendukung");
-    lines.push("- Tidak ada konfirmasi dari sentiment & news");
+  if (risk.rr1 >= 2 && finalScore < 50) {
+    return `RR terlihat menarik di ${formatNumber(risk.rr1, 2)}x, tetapi probabilitas setup masih rendah karena kualitas sinyal belum memadai. Ini lebih cocok dipantau daripada dieksekusi agresif.`;
   }
-  lines.push("");
 
-  // EXECUTION PLAN
-  lines.push(dash);
-  lines.push("🎯 EXECUTION PLAN");
-  if (pipeline.decision.finalDecision === "REJECT" || pipeline.portfolioDecision?.action === "REJECT") {
-    lines.push("Tidak ada entry yang direkomendasikan.");
-  } else {
-    lines.push(`Entry: ${pipeline.risk.entryZone}`);
-    lines.push(`Stop Loss: ${pipeline.risk.stopLoss}`);
-    lines.push(`Target: ${pipeline.risk.tp1} (TP1), ${pipeline.risk.tp2} (TP2)`);
-    lines.push(`Position Size: ${pipeline.risk.positionSize.lots} lots`);
+  if (decision.finalDecision === "BUY_NOW") {
+    return `Setup ${pipeline.ticker} layak dipertimbangkan karena keputusan akhir ${decision.finalDecision}, skor ${finalScore}/100, dan risk plan sudah terbentuk. Eksekusi tetap harus mengikuti stop loss.`;
   }
-  lines.push("");
 
-  // FINAL NOTE
-  lines.push(dash);
-  lines.push("📌 FINAL NOTE");
-  if (pipeline.decision.finalDecision === "REJECT") {
-    lines.push("Fokus ke saham dengan:");
-    lines.push("- Trend jelas");
-    lines.push("- Volume kuat");
-    lines.push("- Catalyst ada");
-  } else {
-    lines.push("Setup valid. Pastikan risk management diterapkan dengan disiplin.");
-  }
-  lines.push("");
+  const blockers = [
+    weakTrend ? "trend belum pulih" : null,
+    weakMomentum ? "momentum masih lemah" : null,
+    weakVolume ? "volume belum mengonfirmasi" : null,
+  ].filter(Boolean).join(", ");
 
-  lines.push(separator);
+  return `Setup ${pipeline.ticker} masih membutuhkan konfirmasi tambahan${blockers ? ` karena ${blockers}` : ""}. Keputusan saat ini lebih defensif daripada agresif.`;
+}
 
-  return lines.join("\n");
+export function exportFullBrief(pipeline: AnalysisPipeline): string {
+  const technical = buildTechnicalBullets(pipeline);
+  const fundamental = buildFundamentalBullets(pipeline);
+  const news = buildNewsBullets(pipeline);
+  const social = buildSocialBullets(pipeline);
+  const dominantBias = getDominantBias(pipeline.finalScore);
+  const rejected = pipeline.decision.finalDecision === "REJECT" || pipeline.portfolioDecision.action === "REJECTED";
+  const bullCase = dedupeBullets(
+    [
+      ...pipeline.debateMatrix.bullCase,
+      ...pipeline.debate.bullishArguments,
+      pipeline.risk.rr1 >= 2 ? `RR TP1 ${formatNumber(pipeline.risk.rr1, 2)}x memberi payoff menarik jika setup terkonfirmasi.` : null,
+      pipeline.indicators.rsi < 35 ? `RSI ${formatNumber(pipeline.indicators.rsi, 1)} mulai oversold dan membuka peluang technical bounce.` : null,
+    ],
+    ["Ada peluang perbaikan jika harga bertahan di atas support dan volume mulai masuk."]
+  );
+  const bearCase = dedupeBullets(
+    [
+      ...pipeline.debateMatrix.bearCase,
+      ...pipeline.debate.bearishArguments,
+      pipeline.indicators.trend === "bearish" ? "Trend bearish masih menjadi hambatan utama karena struktur belum menunjukkan reversal." : null,
+      pipeline.indicators.volumeRatio < 1 ? "Volume lemah membuat peluang rebound menjadi kurang dapat dipercaya." : null,
+      pipeline.newsIntelligence.totalArticles === 0 ? "Tidak ada katalis berita yang dapat mempercepat rerating jangka pendek." : null,
+    ],
+    [pipeline.decision.keyRisk, "Setup rentan gagal jika support ditembus atau market regime tetap defensif."]
+  );
+  const portfolioReasons = dedupeBullets(
+    [
+      ...pipeline.portfolioDecision.reasoning,
+      rejected ? "Setup tidak memenuhi kriteria entry karena edge belum cukup kuat dibanding risiko." : "Setup dapat dipantau selama level risiko tetap dipatuhi.",
+      `Market regime ${pipeline.context.marketRegime}, scanner ${pipeline.scanner.status}, dan risk verdict ${pipeline.risk.verdict} menjadi filter utama.`,
+    ],
+    [pipeline.decision.reasoning]
+  );
+
+  return `
+==================================================
+IDX INSTITUTIONAL BRIEF: ${pipeline.ticker}
+Generated: ${new Date(pipeline.timestamp || Date.now()).toLocaleDateString("id-ID")}
+==================================================
+
+FINAL DECISION
+Action:     ${pipeline.decision.finalDecision}
+Portfolio:  ${pipeline.portfolioDecision.action}
+Score:      ${pipeline.finalScore}/100
+Confidence: ${pipeline.confidence}
+Regime:     ${pipeline.context.marketRegime}
+
+--------------------------------------------------
+EXECUTIVE SUMMARY
+${buildExecutiveSummary(pipeline, dominantBias)}
+
+--------------------------------------------------
+TECHNICAL THESIS
+${technical.map((item) => `- ${item}`).join("\n")}
+
+Kesimpulan:
+${pipeline.scanner.status === "VALID" ? "Setup teknikal dapat dipertimbangkan, tetapi eksekusi tetap harus mengikuti risk plan." : "Belum ada sinyal entry berkualitas tinggi; prioritasnya adalah menunggu konfirmasi yang lebih kuat."}
+
+--------------------------------------------------
+FUNDAMENTAL CONTEXT
+${fundamental.bullets.map((item) => `- ${item}`).join("\n")}
+Bias: ${fundamental.bias}
+
+--------------------------------------------------
+NEWS INTELLIGENCE
+${news.bullets.map((item) => `- ${item}`).join("\n")}
+Bias: ${news.bias}
+
+--------------------------------------------------
+SOCIAL SENTIMENT
+${social.bullets.map((item) => `- ${item}`).join("\n")}
+Bias: ${social.bias}
+
+--------------------------------------------------
+BULL vs BEAR
+
+Bull Case:
+${bullCase.map((item) => `- ${item}`).join("\n")}
+
+Bear Case:
+${bearCase.map((item) => `- ${item}`).join("\n")}
+
+Dominant Bias: ${dominantBias}
+
+--------------------------------------------------
+RISK ANALYSIS
+Entry:     ${pipeline.risk.entryZone}
+Stop Loss: ${formatCurrency(pipeline.risk.stopLoss)}
+TP1:       ${formatCurrency(pipeline.risk.tp1)} (RR ${formatNumber(pipeline.risk.rr1, 2)}x)
+TP2:       ${formatCurrency(pipeline.risk.tp2)} (RR ${formatNumber(pipeline.risk.rr2, 2)}x)
+Size:      ${pipeline.risk.positionSize.lots} lot / ${pipeline.risk.positionSize.shares} saham
+Max Loss:  ${formatCurrency(pipeline.risk.positionSize.maxLoss)}
+
+Catatan:
+- ${pipeline.risk.rr1 >= 2 && pipeline.decision.successProbability < 50 ? `RR menarik, tetapi probability ${pipeline.decision.successProbability}% masih rendah sehingga size harus konservatif.` : pipeline.risk.reasoning}
+- Stop loss di ${formatCurrency(pipeline.risk.stopLoss)} menjadi level invalidasi thesis.
+
+--------------------------------------------------
+PORTFOLIO DECISION
+Status: ${pipeline.portfolioDecision.action}
+Recommended Risk: ${formatPercent(pipeline.portfolioDecision.recommendedRiskPercent)}
+
+Alasan:
+${portfolioReasons.map((item) => `- ${item}`).join("\n")}
+
+--------------------------------------------------
+EXECUTION PLAN
+${rejected ? "Tidak ada entry yang direkomendasikan. Pantau ulang hanya jika trend membaik, volume kembali masuk, dan struktur harga mengonfirmasi reversal." : `Entry di ${pipeline.risk.entryZone}, stop di ${formatCurrency(pipeline.risk.stopLoss)}, target bertahap di ${formatCurrency(pipeline.risk.tp1)} lalu ${formatCurrency(pipeline.risk.tp2)}.`}
+
+--------------------------------------------------
+FINAL NOTE
+Brief ini adalah second-layer trading memo dari pipeline deterministic. Gunakan untuk menantang thesis, memeriksa alasan keputusan, dan menjaga disiplin risiko; bukan sebagai sinyal beli otomatis.
+
+==================================================
+`.trim();
 }
 
 // ============================================================================
@@ -346,11 +482,11 @@ export function exportAIReadyPrompt(pipeline: AnalysisPipeline): string {
 Below is a complete trading brief generated by a rule-based analysis pipeline.
 
 Please provide:
-1. **Second Opinion** — Do you agree or disagree with the pipeline's conclusion? Why?
-2. **Strategic Refinement** — What would you add or change to improve the thesis?
-3. **Institutional Commentary** — Any macro, sector, or structural factors the pipeline may have missed?
-4. **Risk Assessment** — Any overlooked risks or tail events?
-5. **Final Recommendation** — BUY / HOLD / SELL with 1-sentence rationale
+1. **Second Opinion** - Do you agree or disagree with the pipeline's conclusion? Why?
+2. **Strategic Refinement** - What would you add or change to improve the thesis?
+3. **Institutional Commentary** - Any macro, sector, or structural factors the pipeline may have missed?
+4. **Risk Assessment** - Any overlooked risks or tail events?
+5. **Final Recommendation** - BUY / HOLD / SELL with 1-sentence rationale
 
 Be concise and institutional in tone. Do not repeat data already in the brief.
 

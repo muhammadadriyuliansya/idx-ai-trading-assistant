@@ -13,6 +13,17 @@ export interface MarketData {
   fetchedAt: number
 }
 
+export interface DataHealth {
+  status: 'GOOD' | 'DEGRADED' | 'STALE' | 'BAD'
+  score: number
+  lastUpdate: string
+  barsCount: number
+  issues: string[]
+  source: 'live' | 'cache' | 'fallback'
+  hasFundamental: boolean
+  hasNews: boolean
+}
+
 export interface MACDResult {
   macd: number
   signal: number
@@ -50,6 +61,13 @@ export interface ScannerResult {
 }
 
 export interface RiskResult {
+  ticker: string
+  currentPrice: number
+  support: number
+  resistance: number
+  capital: number
+  riskPerTrade: number
+  riskBudget: number
   entryZone: string
   stopLoss: string
   stopReason: string
@@ -202,6 +220,7 @@ export interface AnalysisPipeline {
 
   marketData: MarketData
   indicators: IndicatorSet
+  dataHealth: DataHealth
 
   scanner: ScannerResult
   risk: RiskResult
@@ -249,17 +268,36 @@ export interface AnalysisPipeline {
 
 export interface ScanCandidate {
   ticker: string
+  mode: 'conservative' | 'swing' | 'day'
   setupScore: number
+  scoreBreakdown: {
+    trend: number
+    momentum: number
+    volume: number
+    context: number
+    rrQuality: number
+  }
   volumeRatio: number
   rr: number
   trend: string
   status: 'VALID' | 'WATCHLIST' | 'REJECT'
+  reason: string
+  nextTrigger: string
+  invalidation: string
+  miniBacktest: {
+    outcome: 'TP' | 'SL' | 'OPEN'
+    horizonDays: number
+    estimatedReturnPct: number
+    maxDrawdownPct: number
+  }
+  dataHealth: DataHealth
   marketData: MarketData
   indicators: IndicatorSet
 }
 
 export interface ScanOptions {
   tickers: string[]
+  mode?: 'conservative' | 'swing' | 'day'
   minVolumeRatio?: number
   minRR?: number
   minSetupScore?: number

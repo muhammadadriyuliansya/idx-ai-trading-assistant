@@ -17,6 +17,49 @@ export interface RawNewsItem {
  */
 export async function fetchNewsIntelligence(ticker: string): Promise<NewsIntelligence> {
   try {
+    if (typeof window !== 'undefined') {
+      const response = await fetch(`/api/news?ticker=${encodeURIComponent(ticker)}`, {
+        cache: 'no-store',
+      })
+
+      if (response.ok) {
+        const payload = await response.json() as {
+          news?: RawNewsItem[]
+          sentimentScore?: number
+          totalArticles?: number
+        }
+        const items = payload.news ?? []
+        const titles = items.map((item) => item.title).filter(Boolean).slice(0, 10)
+        const sentimentScore = typeof payload.sentimentScore === 'number'
+          ? payload.sentimentScore
+          : computeSentiment(titles)
+        const sourceMap = new Map<string, { count: number; scores: number[] }>()
+
+        for (const item of items.slice(0, 10)) {
+          const itemScore = computeSingleSentiment(item.title)
+          const existing = sourceMap.get(item.source) ?? { count: 0, scores: [] }
+          existing.count++
+          existing.scores.push(itemScore)
+          sourceMap.set(item.source, existing)
+        }
+
+        const sources: NewsSource[] = Array.from(sourceMap.entries()).map(([name, data]) => ({
+          name,
+          articles: data.count,
+          sentiment: data.scores.length > 0 ? data.scores.reduce((a, b) => a + b, 0) / data.scores.length : 0,
+        }))
+
+        return {
+          sources,
+          totalArticles: payload.totalArticles ?? titles.length,
+          recentHeadlines: titles,
+          dominantSentiment: classifySentiment(sentimentScore),
+          sentimentScore,
+          keyTopics: extractKeyTopics(titles),
+        }
+      }
+    }
+
     const queries = [ticker, `${ticker} saham`, `${ticker} BEI`, `${ticker} IDX`]
     const knownSources = ['IDX Channel', 'Bisnis Indonesia', 'CNBC Indonesia', 'Kontan', 'Bloomberg']
     const allNews: RawNewsItem[] = []
