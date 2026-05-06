@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createLogger } from '@/lib/logger';
+
+const logger = createLogger('api:news');
 
 export async function GET(req: NextRequest) {
   const ticker = req.nextUrl.searchParams.get('ticker');
   if (!ticker) return NextResponse.json({ error: 'No ticker' }, { status: 400 });
+
+  logger.info(`Fetching news for ${ticker}`);
 
   const queries = [ticker, `${ticker} saham`, `${ticker} BEI`, `${ticker} IDX`];
   const sources = ['IDX Channel', 'Bisnis Indonesia', 'CNBC Indonesia', 'Kontan', 'Bloomberg'];
@@ -12,12 +17,21 @@ export async function GET(req: NextRequest) {
   for (const q of queries) {
     const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=id&gl=ID&ceid=ID:id`;
     try {
-      const res = await fetch(rssUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const res = await fetch(rssUrl, { 
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) {
+        logger.warn(`RSS fetch failed for ${q}: HTTP ${res.status}`);
+        continue;
+      }
       const xml = await res.text();
       const items = parseRSS(xml, sources).slice(0, 5);
       allNews.push(...items);
-    } catch {
-      // silent
+    } catch (err) {
+      logger.warn(`Failed to fetch RSS for ${q}`, { 
+        error: err instanceof Error ? err.message : String(err) 
+      });
     }
   }
 
@@ -32,6 +46,8 @@ export async function GET(req: NextRequest) {
 
   // Compute sentiment
   const sentimentScore = computeSentiment(top10.map(n => n.title));
+
+  logger.info(`News fetched for ${ticker}`, { articles: top10.length, sentiment: sentimentScore.toFixed(2) });
 
   return NextResponse.json({
     news: top10,

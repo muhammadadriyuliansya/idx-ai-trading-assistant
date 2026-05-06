@@ -22,6 +22,10 @@ import type {
 import type { AISettings } from '@/lib/types'
 import { applyHardFilters } from './filters'
 import { calculateSetupScore, computeRisk, calculateRiskReward } from '@/lib/calc'
+import { resilientFetch } from '@/lib/resilient-fetch'
+import { createLogger } from '@/lib/logger'
+
+const logger = createLogger('pipeline:orchestrator')
 
 // Phase 1 — Market Intelligence
 import { fetchNewsIntelligence } from './analysts/news-analyst'
@@ -283,16 +287,20 @@ export async function fetchMarketData(ticker: string): Promise<MarketData> {
   const normalisedTicker = ticker.trim().toUpperCase()
   const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
-  const response = await fetch(`/api/quote?ticker=${encodeURIComponent(symbol)}`, {
-    cache: 'no-store',
-  })
+  const data = await resilientFetch<{
+    ticker: string
+    scanner: Record<string, string>
+    risk: Record<string, string>
+    error?: string
+  }>(
+    `/api/quote?ticker=${encodeURIComponent(symbol)}`,
+    { cache: 'no-store' },
+    { cacheKey: `quote:${symbol}`, useCircuitBreaker: true, useCache: true },
+  )
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error?.error || `Failed to fetch data for ${ticker}`)
+  if (data.error) {
+    throw new Error(data.error)
   }
-
-  const data = await response.json()
 
   return {
     ticker: data.ticker,
@@ -327,61 +335,68 @@ export async function fetchMarketDataWithIndicators(
   const normalisedTicker = ticker.trim().toUpperCase()
   const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
-  const response = await fetch(`/api/quote?ticker=${encodeURIComponent(symbol)}`, {
-    cache: 'no-store',
-  })
+  const data = await resilientFetch<Record<string, unknown>>(
+    `/api/quote?ticker=${encodeURIComponent(symbol)}`,
+    { cache: 'no-store' },
+    { cacheKey: `quote:${symbol}`, useCircuitBreaker: true, useCache: true },
+  )
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error?.error || `Failed to fetch data for ${ticker}`)
+  if (data.error) {
+    throw new Error(String(data.error))
   }
 
-  const data = await response.json()
+  const scanner = data.scanner as Record<string, string>
+  const meta = data.meta as Record<string, unknown>
 
   const marketData: MarketData = {
-    ticker: data.ticker,
-    currentPrice: parseFloat(data.scanner.currentPrice),
-    open: parseFloat(data.scanner.open),
-    high: parseFloat(data.scanner.high),
-    low: parseFloat(data.scanner.low),
-    previousClose: parseFloat(data.scanner.previousClose),
-    todayVolume: parseFloat(data.scanner.todayVolume),
-    avgVolume20d: parseFloat(data.scanner.avgVolume20d),
-    support: parseFloat(data.scanner.support),
-    resistance: parseFloat(data.scanner.resistance),
-    atr: parseFloat(data.risk.atr),
+    ticker: data.ticker as string,
+    currentPrice: parseFloat(scanner.currentPrice),
+    open: parseFloat(scanner.open),
+    high: parseFloat(scanner.high),
+    low: parseFloat(scanner.low),
+    previousClose: parseFloat(scanner.previousClose),
+    todayVolume: parseFloat(scanner.todayVolume),
+    avgVolume20d: parseFloat(scanner.avgVolume20d),
+    support: parseFloat(scanner.support),
+    resistance: parseFloat(scanner.resistance),
+    atr: parseFloat((data.risk as Record<string, string>).atr),
     fetchedAt: Date.now(),
   }
 
   const indicators: IndicatorSet = {
-    ema20: parseFloat(data.scanner.ema20),
-    ema50: parseFloat(data.scanner.ema50),
-    ema200: parseFloat(data.scanner.ema200),
-    vwap: parseFloat(data.scanner.vwap),
-    rsi: parseFloat(data.scanner.rsi),
+    ema20: parseFloat(scanner.ema20),
+    ema50: parseFloat(scanner.ema50),
+    ema200: parseFloat(scanner.ema200),
+    vwap: parseFloat(scanner.vwap),
+    rsi: parseFloat(scanner.rsi),
     macd: {
       macd: 0,
       signal: 0,
       histogram: 0,
-      label: data.scanner.macd || 'netral',
+      label: scanner.macd || 'netral',
     },
     stochastic: {
       k: 50,
       d: 50,
-      label: data.scanner.stochastic || 'neutral',
+      label: scanner.stochastic || 'neutral',
     },
-    trend: data.meta.trend,
-    volumeRatio: data.meta.volRatio,
+    trend: meta.trend as IndicatorSet['trend'],
+    volumeRatio: meta.volRatio as number,
   }
+
+  logger.info(`Market data fetched for ${ticker}`, {
+    bars: meta.barsCount,
+    trend: meta.trend,
+  })
 
   return {
     marketData,
     indicators,
-    fundamental: data.fundamental ?? null,
+    fundamental: (data.fundamental as AnalysisPipeline['fundamental']) ?? null,
     dataHealth: buildDataHealth(data),
-    ihsgTrend: data.meta.ihsgTrend ?? deriveIhsgTrend(data.meta.ihsgChange5d, data.meta.ihsgChange1d),
-    ihsgChange5d: data.meta.ihsgChange5d,
-    ihsgChange1d: data.meta.ihsgChange1d,
+    ihsgTrend: (meta.ihsgTrend as 'bullish' | 'sideways' | 'bearish' | 'unknown') ?? deriveIhsgTrend(meta.ihsgChange5d as number | undefined, meta.ihsgChange1d as number | undefined),
+    ihsgChange5d: meta.ihsgChange5d as number | undefined,
+    ihsgChange1d: meta.ihsgChange1d as number | undefined,
   }
 }
 

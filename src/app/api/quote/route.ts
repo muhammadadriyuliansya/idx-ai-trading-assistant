@@ -14,6 +14,10 @@ import {
   swingLevels,
 } from "@/lib/indicators";
 import type { QuoteResult } from "@/lib/types";
+import { validateQuoteResponse } from "@/lib/schemas";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("api:quote");
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +26,54 @@ const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey", "ripHistorical"],
 });
 
-const quoteCache = new Map<string, QuoteResult>();
+interface CacheEntry {
+  data: QuoteResult;
+  timestamp: number;
+}
+
+const quoteCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Simple rate limiting
+interface RateLimitEntry {
+  count: number;
+  resetTime: number;
+}
+
+const rateLimits = new Map<string, RateLimitEntry>();
+const RATE_LIMIT = 30; // max requests
+const RATE_WINDOW_MS = 60 * 1000; // per minute
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimits.get(ip);
+  
+  if (!entry || now > entry.resetTime) {
+    rateLimits.set(ip, { count: 1, resetTime: now + RATE_WINDOW_MS });
+    return true;
+  }
+  
+  if (entry.count >= RATE_LIMIT) {
+    return false;
+  }
+  
+  entry.count++;
+  return true;
+}
+
+function getCachedQuote(symbol: string): QuoteResult | null {
+  const entry = quoteCache.get(symbol);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    quoteCache.delete(symbol);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedQuote(symbol: string, data: QuoteResult): void {
+  quoteCache.set(symbol, { data, timestamp: Date.now() });
+}
 
 interface ChartBar {
   date: Date;
@@ -63,6 +114,11 @@ function normaliseTicker(input: string): string {
   if (!t) return "";
   if (t.includes(".")) return t;
   return `${t}.JK`;
+}
+
+function isValidTicker(ticker: string): boolean {
+  const validTicker = /^[A-Z]{4}(?:\.JK)?$/;
+  return validTicker.test(ticker);
 }
 
 async function fetchBars(symbol: string, days = 260): Promise<Bar[]> {
@@ -132,9 +188,25 @@ export async function GET(request: Request) {
     );
   }
 
-  try {
-    const tickerClean = symbol.replace(".JK", "");
+  const tickerClean = symbol.replace(".JK", "");
+  if (!isValidTicker(tickerClean)) {
+    return NextResponse.json(
+      { error: "Invalid ticker format. Use 4 letters (e.g. BBRI, TLKM)" },
+      { status: 400 },
+    );
+  }
 
+  const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
+  if (!checkRateLimit(clientIp)) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded. Try again in 1 minute." },
+      { status: 429 },
+    );
+  }
+
+  logger.info(`Fetching quote for ${symbol}`);
+
+  try {
     // Paralel: fetch data harga, IHSG, dan fundamental
     const [bars, ihsgBars, fundamental] = await Promise.all([
       fetchBars(symbol),
@@ -223,13 +295,23 @@ export async function GET(request: Request) {
       fundamental, // tambahan fundamental
     };
 
-    quoteCache.set(symbol, result);
+    setCachedQuote(symbol, result);
+
+    logger.info(`Quote fetched successfully for ${symbol}`, {
+      bars: bars.length,
+      trend,
+      volRatio: volRatio.toFixed(2),
+    });
 
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
-    const cached = quoteCache.get(symbol);
+    logger.error(`Failed to fetch quote for ${symbol}`, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+
+    const cached = getCachedQuote(symbol);
     if (cached) {
       return NextResponse.json(
         {

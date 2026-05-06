@@ -30,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { FormattedNumberInput } from "@/components/formatted-input";
 import { PipelineViewer } from "@/components/pipeline-viewer";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { useLocalStorage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import { exportAIReadyPrompt, exportFullBrief } from "@/lib/export";
@@ -38,7 +39,24 @@ import {
   runFullAnalysis,
   type AnalysisRunOptions,
 } from "@/pipeline/orchestrator";
+import {
+  DEFAULT_SMALL_CAPITAL_CONFIG,
+  filterAppliedStocks,
+  getAppliedOnly,
+  type TradingConfig,
+  type AppliedStockResult,
+} from "@/lib/stock-filter";
+import { computeRisk } from "@/lib/calc";
 import type { AnalysisPipeline, ScanCandidate } from "@/pipeline/types";
+import { TabNavigation, type TabId } from "@/components/tabs";
+import { ScannerTab } from "@/components/scanner-tab";
+import { AnalysisTab } from "@/components/analysis-tab";
+import { PortfolioTab } from "@/components/portfolio-tab";
+import { WatchlistTab } from "@/components/watchlist-tab";
+import { MultiTimeframeTab } from "@/components/timeframe-tab";
+import { ComparisonTab } from "@/components/comparison-tab";
+import { MarketBreadthTab } from "@/components/market-breadth-tab";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const STORAGE_KEYS = {
   lastTicker: "idxai.last.ticker",
@@ -124,6 +142,7 @@ function getPipelineOptions(capital: string, riskPerTrade: string): AnalysisRunO
 }
 
 export default function HomePage() {
+  const [activeTab, setActiveTab] = useState<TabId>("scanner");
   const [ticker, setTicker] = useLocalStorage(STORAGE_KEYS.lastTicker, "");
   const [capital, setCapital] = useLocalStorage(
     STORAGE_KEYS.lastCapital,
@@ -138,6 +157,66 @@ export default function HomePage() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [scanResults, setScanResults] = useState<ScanCandidate[]>([]);
   const [scanCompletedAt, setScanCompletedAt] = useState<number | null>(null);
+  const [showAppliedOnly, setShowAppliedOnly] = useState(true);
+
+  const tradingConfig: TradingConfig = useMemo(() => ({
+    capital: parseInt(capital) || 10_000_000,
+    riskPerTrade: parseFloat(riskPerTrade) || 1,
+    targetProfit: parseFloat(riskPerTrade) || 1,
+  }), [capital, riskPerTrade]);
+
+  const filteredResults = useMemo(() => {
+    if (!showAppliedOnly || scanResults.length === 0) return scanResults;
+    
+    const appliedResults: AppliedStockResult[] = scanResults.map(candidate => {
+      const price = candidate.marketData.currentPrice;
+      const support = candidate.marketData.support || price * 0.98;
+      const resistance = candidate.marketData.resistance || price * 1.02;
+      
+      const riskResult = computeRisk({
+        ticker: candidate.ticker,
+        currentPrice: price.toString(),
+        support: support.toString(),
+        resistance: resistance.toString(),
+        atr: (price * 0.02).toString(),
+        capital: capital,
+        riskPerTrade: riskPerTrade,
+      });
+
+      const rr = riskResult 
+        ? (resistance - price) / (price - support)
+        : candidate.rr;
+
+      const maxLoss = riskResult?.maxLoss ?? 0;
+      const positionValue = riskResult?.positionValue ?? 0;
+      const estimatedProfit = positionValue * (tradingConfig.targetProfit / 100);
+      const isApplied = 
+        rr >= 1.0 &&
+        maxLoss > 0 &&
+        maxLoss <= parseInt(capital) * (parseFloat(riskPerTrade) / 100) * 2 &&
+        positionValue <= parseInt(capital) * 0.5 &&
+        estimatedProfit >= 10000;
+
+      return {
+        ticker: candidate.ticker,
+        isApplied,
+        reasons: isApplied ? ["All criteria met"] : [rr < 1.0 ? "RR < 1.0" : "Failed capital rules"],
+        config: tradingConfig,
+        riskResult,
+        rr,
+        setupScore: candidate.setupScore,
+        maxLoss,
+        positionValue,
+        lotSize: riskResult?.lots ?? 0,
+        estimatedProfit,
+      };
+    });
+
+    return getAppliedOnly(appliedResults).map(r => {
+      const original = scanResults.find(s => s.ticker === r.ticker);
+      return original!;
+    }).filter(Boolean);
+  }, [scanResults, showAppliedOnly, capital, riskPerTrade, tradingConfig]);
 
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -323,11 +402,61 @@ export default function HomePage() {
               </p>
             </div>
           </div>
-          <Badge tone="blue">V2 Core</Badge>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Badge tone="blue">V2 Core</Badge>
+          </div>
         </div>
       </header>
 
+      {/* Tab Navigation */}
+      <div className="mx-auto max-w-7xl px-4 pt-2">
+        <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+      </div>
+
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
+        {/* Tab Content */}
+        {activeTab === "scanner" && (
+          <ScannerTab
+            onAnalyze={(t) => analyzeTicker(t)}
+            isAnalyzing={analysisLoading}
+            defaultTickerCount={defaultTickerCount}
+            scanMode={scanMode}
+            onScanModeChange={setScanMode}
+            scanLoading={scanLoading}
+            scanResults={filteredResults}
+            scanError={scanError}
+            scanCompletedAt={scanCompletedAt}
+            showAppliedOnly={showAppliedOnly}
+            onShowAppliedOnlyChange={setShowAppliedOnly}
+            appliedCount={showAppliedOnly ? filteredResults.length : scanResults.length}
+          />
+        )}
+
+        {activeTab === "analysis" && (
+          <AnalysisTab initialTicker={ticker} />
+        )}
+
+        {activeTab === "portfolio" && (
+          <PortfolioTab />
+        )}
+
+        {activeTab === "watchlist" && (
+          <WatchlistTab />
+        )}
+
+        {activeTab === "comparison" && (
+          <ComparisonTab />
+        )}
+
+        {activeTab === "timeframe" && (
+          <MultiTimeframeTab />
+        )}
+
+        {activeTab === "breadth" && (
+          <MarketBreadthTab />
+        )}
+
         <Card className="border-blue-500/15 bg-blue-500/5">
           <CardContent className="p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -440,8 +569,11 @@ export default function HomePage() {
           />
         </section>
 
+        {/* Hide old Market Scanner when using Scanner Tab */}
+        {activeTab !== "scanner" && (
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-4">
+            <ErrorBoundary sectionName="Market Scanner">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-blue-300">
@@ -606,6 +738,7 @@ export default function HomePage() {
                 </CardContent>
               </Card>
             )}
+            </ErrorBoundary>
           </div>
 
           <aside className="space-y-4">
@@ -757,6 +890,7 @@ export default function HomePage() {
             )}
           </aside>
         </section>
+        )}
 
         {analysisLoading && (
           <Card>
@@ -775,6 +909,7 @@ export default function HomePage() {
         )}
 
         {analysis && !analysisLoading && (
+          <ErrorBoundary sectionName="Analysis Results">
           <motion.section
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
@@ -902,6 +1037,7 @@ export default function HomePage() {
               onAnalyzeWithAI={(prompt) => openTextModal("AI-Ready Prompt", prompt)}
             />
           </motion.section>
+          </ErrorBoundary>
         )}
       </main>
 

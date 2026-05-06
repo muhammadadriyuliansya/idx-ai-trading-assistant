@@ -222,3 +222,227 @@ export function describeStochastic(bars: Bar[], period = 14, smooth = 3): string
   else if (k <= 20) label = "oversold";
   return `K ${k.toFixed(0)} / D ${d.toFixed(0)} (${label})`;
 }
+
+// ============================================================================
+// BOLLINGER BANDS
+// ============================================================================
+
+export interface BollingerBands {
+  upper: number[];
+  middle: number[];
+  lower: number[];
+  bandwidth: number[];
+  percentB: number[];
+}
+
+export function bollingerBands(closes: number[], period = 20, stdDev = 2): BollingerBands {
+  const sma20 = sma(closes, period);
+  const upper: number[] = [];
+  const lower: number[] = [];
+  const bandwidth: number[] = [];
+  const percentB: number[] = [];
+
+  for (let i = period - 1; i < closes.length; i++) {
+    const slice = closes.slice(i - period + 1, i + 1);
+    const mean = sma20[i];
+    const variance = slice.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / period;
+    const std = Math.sqrt(variance);
+    
+    const u = mean + stdDev * std;
+    const l = mean - stdDev * std;
+    const bw = (u - l) / mean * 100;
+    const pb = (closes[i] - l) / (u - l) * 100;
+    
+    upper.push(u);
+    lower.push(l);
+    bandwidth.push(bw);
+    percentB.push(pb);
+  }
+
+  return {
+    upper,
+    middle: sma20.slice(period - 1),
+    lower,
+    bandwidth,
+    percentB,
+  };
+}
+
+export function describeBollinger(bands: BollingerBands): string {
+  if (bands.percentB.length === 0) return "n/a";
+  const pb = bands.percentB[bands.percentB.length - 1];
+  if (pb > 100) return "above upper band";
+  if (pb < 0) return "below lower band";
+  if (pb > 80) return "near upper band";
+  if (pb < 20) return "near lower band";
+  return "within bands";
+}
+
+// ============================================================================
+// AVERAGE DIRECTIONAL INDEX (ADX)
+// ============================================================================
+
+export interface ADXResult {
+  adx: number[];
+  plusDi: number[];
+  minusDi: number[];
+}
+
+export function adx(bars: Bar[], period = 14): ADXResult {
+  if (bars.length < period * 2) {
+    return { adx: [], plusDi: [], minusDi: [] };
+  }
+
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+  const closes = bars.map((b) => b.close);
+
+  const plusDm: number[] = [];
+  const minusDm: number[] = [];
+  const tr: number[] = [];
+
+  for (let i = 1; i < bars.length; i++) {
+    const up = highs[i] - highs[i - 1];
+    const down = lows[i - 1] - lows[i];
+    plusDm.push(up > down && up > 0 ? up : 0);
+    minusDm.push(down > up && down > 0 ? down : 0);
+    
+    const hl = highs[i] - lows[i];
+    const hc = Math.abs(highs[i] - closes[i - 1]);
+    const lc = Math.abs(lows[i] - closes[i - 1]);
+    tr.push(Math.max(hl, hc, lc));
+  }
+
+  const smoothedPlus = ema(plusDm, period);
+  const smoothedMinus = ema(minusDm, period);
+  const smoothedTr = ema(tr, period);
+
+  const plusDi: number[] = [];
+  const minusDi: number[] = [];
+  const dx: number[] = [];
+
+  for (let i = 0; i < smoothedTr.length; i++) {
+    const pdi = (smoothedPlus[i] / smoothedTr[i]) * 100;
+    const mdi = (smoothedMinus[i] / smoothedTr[i]) * 100;
+    plusDi.push(pdi);
+    minusDi.push(mdi);
+    const dxVal = Math.abs(pdi - mdi) / (pdi + mdi) * 100;
+    dx.push(dxVal);
+  }
+
+  const adx = ema(dx, period);
+
+  return { adx, plusDi, minusDi };
+}
+
+export function describeADX(adxResult: ADXResult): string {
+  if (adxResult.adx.length === 0) return "n/a";
+  const adxVal = adxResult.adx[adxResult.adx.length - 1];
+  const plusDi = adxResult.plusDi[adxResult.plusDi.length - 1];
+  const minusDi = adxResult.minusDi[adxResult.minusDi.length - 1];
+  
+  let trend = "sideways";
+  if (adxVal > 25) {
+    trend = plusDi > minusDi ? "strong uptrend" : "strong downtrend";
+  } else if (adxVal > 15) {
+    trend = plusDi > minusDi ? "weak uptrend" : "weak downtrend";
+  }
+  
+  return `${trend} (ADX: ${adxVal.toFixed(1)})`;
+}
+
+// ============================================================================
+// ICHIMOKU CLOUD
+// ============================================================================
+
+export interface IchimokuResult {
+  tenkan: number[];
+  kijun: number[];
+  senkouA: number[];
+  senkouB: number[];
+  chikou: number[];
+}
+
+export function ichimoku(bars: Bar[]): IchimokuResult {
+  const closes = bars.map((b) => b.close);
+  const highs = bars.map((b) => b.high);
+  const lows = bars.map((b) => b.low);
+
+  const tenkanPeriod = 9;
+  const kijunPeriod = 26;
+  const senkouPeriod = 52;
+
+  const getMidpoint = (arr: number[], period: number, idx: number): number => {
+    const start = Math.max(0, idx - period + 1);
+    const slice = arr.slice(start, idx + 1);
+    return Math.max(...slice);
+  };
+
+  const getLowMidpoint = (arr: number[], period: number, idx: number): number => {
+    const start = Math.max(0, idx - period + 1);
+    const slice = arr.slice(start, idx + 1);
+    return Math.min(...slice);
+  };
+
+  const tenkan: number[] = [];
+  const kijun: number[] = [];
+  const senkouA: number[] = [];
+  const senkouB: number[] = [];
+  const chikou: number[] = [];
+
+  for (let i = kijunPeriod - 1; i < closes.length; i++) {
+    const tenkanSen = (getMidpoint(highs, tenkanPeriod, i) + getLowMidpoint(lows, tenkanPeriod, i)) / 2;
+    const kijunSen = (getMidpoint(highs, kijunPeriod, i) + getLowMidpoint(lows, kijunPeriod, i)) / 2;
+    
+    tenkan.push(tenkanSen);
+    kijun.push(kijunSen);
+    
+    const senkouAVal = (tenkanSen + kijunSen) / 2;
+    const senkouBVal = (getMidpoint(highs, senkouPeriod, i) + getLowMidpoint(lows, senkouPeriod, i)) / 2;
+    
+    senkouA.push(senkouAVal);
+    senkouB.push(senkouBVal);
+    chikou.push(closes[i]);
+  }
+
+  return { tenkan, kijun, senkouA, senkouB, chikou };
+}
+
+export function describeIchimoku(ichimoku: IchimokuResult): string {
+  if (ichimoku.tenkan.length === 0) return "n/a";
+  
+  const lastIdx = ichimoku.tenkan.length - 1;
+  const tenkan = ichimoku.tenkan[lastIdx];
+  const kijun = ichimoku.kijun[lastIdx];
+  const senkouA = ichimoku.senkouA[lastIdx];
+  const senkouB = ichimoku.senkouB[lastIdx];
+  
+  let signal = "";
+  if (tenkan > kijun) signal = "golden cross";
+  else if (tenkan < kijun) signal = "death cross";
+  else signal = "neutral";
+  
+  const cloud = senkouA > senkouB ? "bullish cloud" : "bearish cloud";
+  
+  return `${signal}, ${cloud}`;
+}
+
+// ============================================================================
+// ON BALANCE VOLUME (OBV)
+// ============================================================================
+
+export function obv(bars: Bar[]): number[] {
+  const out: number[] = [bars[0].volume];
+  
+  for (let i = 1; i < bars.length; i++) {
+    if (bars[i].close > bars[i - 1].close) {
+      out.push(out[i - 1] + bars[i].volume);
+    } else if (bars[i].close < bars[i - 1].close) {
+      out.push(out[i - 1] - bars[i].volume);
+    } else {
+      out.push(out[i - 1]);
+    }
+  }
+  
+  return out;
+}

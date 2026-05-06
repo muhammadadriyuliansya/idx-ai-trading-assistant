@@ -239,6 +239,120 @@ Modular per modul (`src/lib/prompts.ts`):
 
 Setiap prompt bisa di-override per session lewat **Prompt Editor** di setiap modul (otomatis ke-save di localStorage).
 
+## 📡 API Endpoints
+
+### GET /api/quote
+Fetch stock quote dan technical indicators dari Yahoo Finance.
+
+**Parameters:**
+- `ticker` (required): 4-letter IDX ticker (e.g., `BBRI`, `TLKM`)
+
+**Response:**
+```json
+{
+  "ticker": "BBRI.JK",
+  "scanner": {
+    "currentPrice": "4500",
+    "support": "4300",
+    "resistance": "4800",
+    "ema20": "4450",
+    "rsi": "55",
+    "macd": "bullish crossover"
+  },
+  "risk": {
+    "atr": "120"
+  },
+  "meta": {
+    "trend": "bullish",
+    "volRatio": 1.5
+  }
+}
+```
+
+### GET /api/news
+Fetch news articles untuk satu ticker dari Google News RSS.
+
+**Parameters:**
+- `ticker` (required): 4-letter IDX ticker
+
+**Response:**
+```json
+{
+  "news": [...],
+  "sentimentScore": 0.15,
+  "totalArticles": 10
+}
+```
+
+### GET /api/health
+Health check endpoint untuk monitoring.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-05-06T10:00:00.000Z",
+  "uptime": 3600,
+  "services": {
+    "yahooFinance": "healthy",
+    "newsFeed": "healthy"
+  }
+}
+```
+
+### POST /api/health
+Reset server-side cache dan circuit breakers.
+
+---
+
+## 🎯 Applied Stock Filter (1-10JT Capital)
+
+Aplikasi sekarang mendukung filtering untuk modal kecil (1-10 juta) dengan risk 1-2%.
+
+### Konfigurasi Trading
+
+| Config | Capital | Risk/Trade | Target Profit |
+|--------|---------|------------|---------------|
+| Small | 1 JT | 1% | 1% |
+| Medium | 5 JT | 1.5% | 1.5% |
+| Large | 10 JT | 2% | 2% |
+
+### Validasi Input
+
+- **Capital**: 1,000,000 - 10,000,000 IDR
+- **Risk per trade**: 1% - 2%
+- **Target profit**: 1% - 2%
+
+### Kriteria Applied Stock
+
+Saham dianggap **APPLIED** jika:
+1. Capital dalam range 1-10 juta
+2. Risk per trade 1-2%
+3. Risk/Reward ratio ≥ 1.0
+4. Setup score ≥ 50
+5. Max loss tidak melebihi 2x risk budget
+6. Position size ≤ 50% capital
+
+### Gunakan di Code
+
+```typescript
+import { 
+  analyzeStockForApplied, 
+  getAppliedOnly,
+  DEFAULT_SMALL_CAPITAL_CONFIG 
+} from '@/lib/stock-filter';
+
+const result = analyzeStockForApplied('BBRI', scannerData, DEFAULT_SMALL_CAPITAL_CONFIG);
+
+if (result.isApplied) {
+  console.log('APPLIED - Lot:', result.lotSize);
+  console.log('RR:', result.rr);
+  console.log('Est. Profit:', result.estimatedProfit);
+}
+```
+
+---
+
 ## 🏗️ Development
 
 ### Project Structure
@@ -247,7 +361,9 @@ src/
 ├── app/
 │   ├── api/
 │   │   ├── ai/route.ts          # OpenAI/Anthropic proxy
-│   │   └── quote/route.ts       # Yahoo Finance data fetch
+│   │   ├── quote/route.ts       # Yahoo Finance data fetch
+│   │   ├── news/route.ts       # News RSS fetch
+│   │   └── health/route.ts     # Health check
 │   ├── layout.tsx
 │   └── page.tsx
 ├── components/
@@ -270,6 +386,7 @@ src/
 │   ├── calc.ts                  # Trading calculations
 │   ├── indicators.ts            # Technical indicators
 │   ├── prompts.ts               # AI prompts
+│   ├── stock-filter.ts          # Applied stock filter
 │   ├── quote.ts                 # Yahoo Finance integration
 │   ├── storage.ts               # localStorage helpers
 │   ├── types.ts                 # TypeScript types
