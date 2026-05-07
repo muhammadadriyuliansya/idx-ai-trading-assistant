@@ -1,16 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
   Loader2,
-  RefreshCw,
   TrendingUp,
-  BarChart3,
-  Target,
   Zap,
-  ChevronRight,
   Clock,
   Volume2,
 } from "lucide-react";
@@ -19,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getDefaultIDXTickers, runMarketScan } from "@/pipeline/scanner";
 import type { ScanCandidate } from "@/pipeline/types";
 
 type ScanMode = 'conservative' | 'swing' | 'day';
@@ -70,10 +65,6 @@ export function ScannerTab({
 }: ScannerTabProps) {
   const [customTickers, setCustomTickers] = useState("");
   const [useCustom, setUseCustom] = useState(false);
-
-  const handleScan = useCallback(async () => {
-    // Scan akan di-trigger dari parent
-  }, []);
 
   return (
     <div className="space-y-6">

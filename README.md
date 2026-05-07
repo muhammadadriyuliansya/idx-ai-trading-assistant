@@ -1,459 +1,139 @@
 # IDX AI Trading Assistant
 
-Semi-manual AI trading assistant untuk **swing trade & daytrade saham IDX (BEI)**.
+IDX AI Trading Assistant is a Next.js application for semi-manual Indonesian stock market analysis. It combines deterministic market scanning, risk sizing, context checks, analyst-style scoring, portfolio guardrails, and optional AI explanation prompts.
 
-> ⚠️ Bukan auto trading. Bukan AI prediksi harga.
-> Tujuan: bantu trader ambil keputusan lebih konsisten lewat technical setup, risk management, market context, trade journal, dan AI-assisted decision making.
+This is not an auto-trading bot and does not place orders. The app is designed to help traders review IDX setups more consistently before taking manual action.
 
-## 🎯 Fitur Utama
+## Features
 
-### 🚀 Full Pipeline Analysis (NEW!)
-- **One-click analysis** - Input ticker sekali, jalankan complete analysis pipeline
-- **Automated flow** - Data fetch → Indicators → Scanner → Risk → Context → Debate → Decision
-- **Shared state** - Semua modul baca dari state yang sama, tidak ada input ulang
-- **AI-optional** - Jalan 100% tanpa API key, AI hanya untuk explanation tambahan
+- Market scanner for default IDX tickers with setup score, trend, volume ratio, risk/reward, and status.
+- Full ticker analysis pipeline with market data, indicators, hard filters, risk plan, context, debate, thesis, and final decision.
+- Daily capital guard for trade frequency, daily loss, and risk-per-trade control.
+- Watchlist, local alerts, AI opinions, and portfolio history stored in browser storage.
+- Exportable institutional brief and AI-ready prompt.
+- Optional OpenAI or Anthropic analysis layer. Core analysis works without an API key.
+- Unit tests for calculations, indicators, scanner filtering, news behavior, orchestrator behavior, and risk governance.
 
-### 📊 Market Scanner (NEW!)
-- **Multi-ticker scan** - Scan 40+ IDX blue-chip stocks sekaligus
-- **Hard filters** - Volume ratio, RR, trend, price range
-- **Auto ranking** - Sort by setup quality
-- **Quick analyze** - One-click ke full pipeline
+## Tech Stack
 
-### 🔧 Individual Modules
+- Next.js 16 App Router
+- React 19
+- TypeScript
+- Tailwind CSS 4
+- Framer Motion
+- Lucide React icons
+- Vitest with jsdom
+- Yahoo Finance data through the local quote API route
 
-| Module               | Tugas                                                                |
-| -------------------- | -------------------------------------------------------------------- |
-| **Market Scanner**   | Klasifikasi setup (breakout / pullback / reversal / fake / no setup), setup score 0–100, confidence, status VALID/WATCHLIST/REJECT. |
-| **Risk Management**  | Hitung entry, stop loss, TP1/TP2, RR, lot ideal, max loss. AI validasi & adjust. |
-| **Market Context**   | Macro & sector read. Tentuin AGGRESSIVE / NORMAL / DEFENSIVE.        |
-| **Decision Engine**  | Final verdict: BUY NOW / WAIT / WATCHLIST / REJECT.                   |
-| **Trade Journal**    | Evaluasi post-trade: execution, FOMO, discipline, lessons learned.   |
+## Folder Structure
 
-## 🏗️ Architecture
-
-### Pipeline System
-```
-src/pipeline/
-├── orchestrator.ts    # Central orchestrator untuk full analysis
-├── types.ts           # Unified types untuk semua pipeline components
-├── scanner.ts         # Automated market scanner
-└── filters.ts         # Hard filters sebelum AI analysis
-```
-
-### Core Logic
-```
-src/lib/
-├── indicators.ts      # Technical indicators (EMA, RSI, MACD, ATR, VWAP)
-├── calc.ts            # Trading calculations (RR, position sizing, setup score)
-├── ai.ts              # AI integration (OpenAI/Anthropic wrapper)
-├── prompts.ts         # AI prompts (modular, customizable)
-├── quote.ts           # Yahoo Finance integration
-├── storage.ts         # localStorage helpers
-├── types.ts           # TypeScript types
-└── utils.ts           # Utility functions
+```text
+src/
+  app/                    Next.js routes, API handlers, global styles, app shell page
+  components/             Reusable UI and feature-facing React components
+    pipeline-viewer/      Smaller parts used by the full pipeline viewer
+    ui/                   Low-level UI primitives
+  config/                 App-wide constants such as storage keys and scan defaults
+  features/
+    trading/              Dashboard-specific types, display maps, filters, and helpers
+  lib/                    Shared domain utilities, calculations, exports, storage, logging
+  pipeline/               Market scanner and deterministic analysis pipeline
+    analysts/             Technical, fundamental, news, sentiment, and macro analysts
+    portfolio/            Portfolio decision logic
+    research/             Bull/bear research and consensus
+    thesis/               Thesis builder
 ```
 
-### UI Components
-```
-src/components/
-├── pipeline-module.tsx    # Full pipeline UI
-├── pipeline-viewer.tsx    # Results viewer
-├── market-scanner.tsx     # Multi-ticker scanner
-├── modules.tsx            # Individual module components
-├── app-shell.tsx          # Main layout
-├── settings-panel.tsx     # Settings UI
-└── shared.tsx             # Shared UI components
-```
-
-## 📖 Cara Pakai
-
-### 1. Full Pipeline (Recommended)
-
-1. Buka menu **Full Pipeline**
-2. Input ticker (contoh: `BBRI`)
-3. Configure settings:
-   - **Capital** - Modal trading aktif (default: 100M)
-   - **Risk Per Trade** - % risk per trade (default: 1%)
-   - **Min RR** - Minimum risk/reward ratio (default: 2.0)
-   - **Min Volume Ratio** - Minimum volume vs average (default: 1.5x)
-4. Klik **Run Analysis**
-5. Tunggu hasil lengkap:
-   - **Scanner Analysis** - Setup score, type, warnings, key reads
-   - **Risk Management** - Entry zone, stop loss, TP1/TP2, position size
-   - **Market Context** - Regime, risk stance, key risks
-   - **Internal Debate** - Bullish vs bearish arguments, consensus
-   - **Final Decision** - BUY NOW / WAIT / WATCHLIST / REJECT dengan confidence
-
-### 2. Market Scanner
-
-1. Buka menu **Market Scanner**
-2. Biarkan tickers kosong untuk default IDX list (40+ blue-chip stocks), atau input custom tickers (comma-separated)
-3. Configure filters:
-   - **Min Volume Ratio** - Default 1.5x
-   - **Min RR** - Default 2.0
-   - **Min Setup Score** - Default 50
-   - **Max Results** - Default 20
-4. Klik **Run Market Scan**
-5. Lihat ranking candidates dengan:
-   - Setup score
-   - Volume ratio
-   - Risk/reward
-   - Trend
-   - Status (VALID/WATCHLIST/REJECT)
-6. Klik **Analyze in Pipeline** untuk detailed analysis
-
-### 3. Individual Modules
-
-Untuk detailed analysis per modul:
-
-- **Scanner** - Input data teknikal, dapat setup score & classification
-- **Risk** - Input support/resistance, dapat risk plan & position sizing
-- **Context** - Input market data, dapat regime analysis
-- **Decision** - Gabungkan semua hasil, dapat final verdict
-- **Journal** - Log trade selesai, dapat AI coaching
-
-## 🎨 Auto Fetch (Market Scanner & Risk)
-
-Tinggal ketik ticker IDX (mis. `BBRI`, `TLKM`, `GOTO`) lalu klik **Fetch** —
-aplikasi tarik ~250 bar harian dari Yahoo Finance untuk `<TICKER>.JK`,
-hitung indikator lokal, lalu auto-isi form Scanner + Risk:
-
-- OHLC, current price, prev close, today volume
-- Avg volume 20D & vol-vs-avg ratio
-- EMA20 / EMA50 / EMA200, VWAP rolling 5D
-- RSI(14), MACD label (cross / above / below signal), Stochastic K/D
-- Swing-pivot Support & Resistance (lookback 80, window 3)
-- ATR(14) untuk Risk module
-- IHSG context (`^JKSE`) → trend label + 5D % change
-
-Field yang **tetap manual** karena Yahoo nggak punya datanya:
-**Foreign Flow**, **Broker Accumulation**, **Sector Strength**.
-
-Endpoint: `GET /api/quote?ticker=BBRI` (bisa dipanggil terpisah juga).
-Catatan: Yahoo Finance kadang rate-limit IP datacenter (Vercel, dll).
-Untuk pemakaian harian, run lokal di mesin sendiri.
-
-## 🔧 Configuration
-
-### AI Settings (Optional)
-
-AI tidak wajib - aplikasi jalan 100% tanpa API key. Untuk AI explanation:
-
-1. Buka **Settings**
-2. Pilih provider (**OpenAI** atau **Anthropic**)
-3. Masukkan API key
-4. Pilih model:
-   - OpenAI: `gpt-4o-mini` (default), `gpt-4o`, dll
-   - Anthropic: `claude-3-5-sonnet-latest` (default), dll
-
-Key disimpan **hanya di localStorage browser kamu**, dan dikirim ke endpoint internal `/api/ai` untuk diteruskan ke provider.
-
-## 📊 Trading Rules
-
-### IDX Specific
-- **Lot Size**: 1 lot = 100 shares (hardcoded)
-- **Risk Management**: Default RR minimum 1.5, reject kalau kurang
-- **Volume Analysis**: Always check volume vs average, reject illiquid stocks
-- **Foreign Flow**: Manual input (Yahoo Finance tidak punya data ini)
-- **Market Context**: IHSG trend (`^JKSE`) always considered dalam decision
-
-### Setup Scoring
-- **Trend** (max 30): Price vs EMA20/50/200, VWAP
-- **Momentum** (max 20): RSI, MACD
-- **Volume** (max 20): Volume ratio vs average
-- **Context** (max 20): IHSG trend, sector strength, foreign flow
-- **RR Quality** (max 10): Risk/reward ratio
-
-### Decision Logic
-- **BUY NOW**: Setup VALID + Risk ACCEPT + Debate BULLISH
-- **WATCHLIST**: Setup WATCHLIST atau Risk ADJUST
-- **WAIT**: Debate NEUTRAL
-- **REJECT**: Setup REJECT atau Risk REJECT
-
-## 🛠️ Tech Stack
-
-- **Next.js 16** (App Router) + **TypeScript** - Modern React framework
-- **TailwindCSS v4** - Latest styling dengan syntax baru
-- **shadcn/ui-style** primitives - Custom UI components
-- **lucide-react** icons
-- **framer-motion** animations
-- **localStorage** - Persist settings, form data, prompts, setups, trade history
-- **Yahoo Finance API** - Primary data source untuk OHLC, indicators, IHSG context
-- **API route Next.js** - Forward request ke OpenAI/Anthropic (user bawa API key sendiri)
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 18+
-- npm atau yarn
-
-### Installation
+## Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/muhammadadriyuliansya/idx-ai-trading-assistant.git
-cd idx-ai-trading-assistant
+npm ci
+```
 
-# Install dependencies
-npm install
+Use Node.js 20+ for local development. CI currently validates Node.js 18 and 20.
 
-# Run development server
+## Development Workflow
+
+```bash
 npm run dev
+```
 
-# Build for production
+Open `http://localhost:3000`.
+
+Recommended checks while developing:
+
+```bash
+npm run lint
+npm run typecheck
+npm run test
+```
+
+Run the complete local verification suite before release:
+
+```bash
+npm run verify
+```
+
+## Build and Run
+
+```bash
 npm run build
-npm start
+npm run start
 ```
 
-Buka [http://localhost:3000](http://localhost:3000) di browser.
+The production server starts the compiled Next.js app. Market quotes are fetched through `GET /api/quote?ticker=BBRI`, which normalizes IDX symbols to `.JK` when needed.
 
-### Set up API key (Optional)
+## Environment Variables
 
-AI tidak wajib - aplikasi jalan 100% tanpa API key. Untuk AI explanation:
+No environment variables are required for the deterministic scanner and analysis pipeline.
 
-1. Klik **Settings** di topbar atau sidebar.
-2. Pilih provider (OpenAI / Anthropic) dan masukin API key kamu.
-3. Pilih model (default: `gpt-4o-mini` / `claude-3-5-sonnet-latest`).
-4. Key disimpan **hanya di localStorage browser kamu**, dan dikirim ke endpoint internal `/api/ai` untuk diteruskan ke provider.
+AI keys are entered in the app settings and sent only to the local `/api/ai` route for the requested generation. Do not commit API keys, tokens, or secrets.
 
-## 🧩 Helper Functions
+Optional deployment variables can be added by the hosting provider as needed, but the current app does not require a committed `.env` file.
 
-Di `src/lib`:
+## Deployment Notes
 
-- `buildPrompt(module, payload)` — generate `{ system, user }` prompt per modul
-- `generateAnalysis(req)` — client helper yang panggil `/api/ai`
-- `calculateRiskReward(entry, stop, target)`
-- `calculatePositionSize(capital, riskPct, entry, stop)` — IDX lot size 100
-- `computeRisk(input)` — full risk plan: entry, SL, TP1/TP2, lot, max loss
-- `calculateSetupScore(input, rr)` — heuristic 0–100 + confidence + status
+- Deploy as a standard Next.js app.
+- Use `npm ci`, `npm run build`, and `npm run start` for a production build.
+- Yahoo Finance can rate-limit hosted environments. For heavy daily use, prefer running locally or add a more durable market-data provider behind `/api/quote`.
+- Keep API keys out of source control. The repository ignores `.env*` by default.
 
-## 📝 Prompt System
+## Architecture Notes
 
-Modular per modul (`src/lib/prompts.ts`):
+The application is organized around a deterministic pipeline:
 
-- `SYSTEM_PROMPTS.scanner`
-- `SYSTEM_PROMPTS.risk`
-- `SYSTEM_PROMPTS.context`
-- `SYSTEM_PROMPTS.decision`
-- `SYSTEM_PROMPTS.journal`
-
-Setiap prompt bisa di-override per session lewat **Prompt Editor** di setiap modul (otomatis ke-save di localStorage).
-
-## 📡 API Endpoints
-
-### GET /api/quote
-Fetch stock quote dan technical indicators dari Yahoo Finance.
-
-**Parameters:**
-- `ticker` (required): 4-letter IDX ticker (e.g., `BBRI`, `TLKM`)
-
-**Response:**
-```json
-{
-  "ticker": "BBRI.JK",
-  "scanner": {
-    "currentPrice": "4500",
-    "support": "4300",
-    "resistance": "4800",
-    "ema20": "4450",
-    "rsi": "55",
-    "macd": "bullish crossover"
-  },
-  "risk": {
-    "atr": "120"
-  },
-  "meta": {
-    "trend": "bullish",
-    "volRatio": 1.5
-  }
-}
+```text
+Quote API -> indicators -> hard filters -> scanner -> risk -> context
+          -> debate -> analyst reports -> thesis -> portfolio decision
+          -> risk governor -> final UI and export
 ```
 
-### GET /api/news
-Fetch news articles untuk satu ticker dari Google News RSS.
+Core trading calculations live in `src/lib`. Pipeline orchestration and analysis stages live in `src/pipeline`. UI-specific dashboard helpers live in `src/features/trading` so `src/app/page.tsx` stays focused on composition and state wiring.
 
-**Parameters:**
-- `ticker` (required): 4-letter IDX ticker
+AI is optional. The deterministic pipeline produces a complete output without external AI calls; AI is used only to generate extra narrative analysis from an exported prompt.
 
-**Response:**
-```json
-{
-  "news": [...],
-  "sentimentScore": 0.15,
-  "totalArticles": 10
-}
-```
+## Refactoring Notes
 
-### GET /api/health
-Health check endpoint untuk monitoring.
+The current structure was cleaned to reduce feature clutter and make ownership clearer:
 
-**Response:**
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-05-06T10:00:00.000Z",
-  "uptime": 3600,
-  "services": {
-    "yahooFinance": "healthy",
-    "newsFeed": "healthy"
-  }
-}
-```
+- App constants moved to `src/config/app.ts`.
+- Dashboard types, badge tones, applied-stock filtering, watchlist/alert helpers, and small dashboard components moved to `src/features/trading`.
+- Pipeline viewer helper components moved to `src/components/pipeline-viewer`.
+- Archived dead code and unused default public SVG assets were removed.
+- CI commands now reuse package scripts, and `npm run verify` provides one local release check.
 
-### POST /api/health
-Reset server-side cache dan circuit breakers.
+## Contribution Guidelines
 
----
+- Keep core trading behavior deterministic and covered by focused tests.
+- Put route handlers in `src/app/api`, reusable UI in `src/components`, trading helpers in `src/features/trading`, and domain logic in `src/lib` or `src/pipeline`.
+- Prefer small functions and explicit types over clever abstractions.
+- Do not add new dependencies unless they replace meaningful complexity.
+- Run `npm run verify` before opening a pull request.
+- Never commit secrets, generated build output, `.next`, `node_modules`, or local TypeScript build info.
 
-## 🎯 Applied Stock Filter (1-10JT Capital)
+## Recommended Next Improvements
 
-Aplikasi sekarang mendukung filtering untuk modal kecil (1-10 juta) dengan risk 1-2%.
-
-### Konfigurasi Trading
-
-| Config | Capital | Risk/Trade | Target Profit |
-|--------|---------|------------|---------------|
-| Small | 1 JT | 1% | 1% |
-| Medium | 5 JT | 1.5% | 1.5% |
-| Large | 10 JT | 2% | 2% |
-
-### Validasi Input
-
-- **Capital**: 1,000,000 - 10,000,000 IDR
-- **Risk per trade**: 1% - 2%
-- **Target profit**: 1% - 2%
-
-### Kriteria Applied Stock
-
-Saham dianggap **APPLIED** jika:
-1. Capital dalam range 1-10 juta
-2. Risk per trade 1-2%
-3. Risk/Reward ratio ≥ 1.0
-4. Setup score ≥ 50
-5. Max loss tidak melebihi 2x risk budget
-6. Position size ≤ 50% capital
-
-### Gunakan di Code
-
-```typescript
-import { 
-  analyzeStockForApplied, 
-  getAppliedOnly,
-  DEFAULT_SMALL_CAPITAL_CONFIG 
-} from '@/lib/stock-filter';
-
-const result = analyzeStockForApplied('BBRI', scannerData, DEFAULT_SMALL_CAPITAL_CONFIG);
-
-if (result.isApplied) {
-  console.log('APPLIED - Lot:', result.lotSize);
-  console.log('RR:', result.rr);
-  console.log('Est. Profit:', result.estimatedProfit);
-}
-```
-
----
-
-## 🏗️ Development
-
-### Project Structure
-```
-src/
-├── app/
-│   ├── api/
-│   │   ├── ai/route.ts          # OpenAI/Anthropic proxy
-│   │   ├── quote/route.ts       # Yahoo Finance data fetch
-│   │   ├── news/route.ts       # News RSS fetch
-│   │   └── health/route.ts     # Health check
-│   ├── layout.tsx
-│   └── page.tsx
-├── components/
-│   ├── pipeline-module.tsx      # Full pipeline UI
-│   ├── pipeline-viewer.tsx      # Results viewer
-│   ├── market-scanner.tsx       # Multi-ticker scanner
-│   ├── modules.tsx              # Individual modules
-│   ├── app-shell.tsx            # Main layout
-│   ├── settings-panel.tsx       # Settings UI
-│   └── shared.tsx               # Shared UI components
-├── pipeline/
-│   ├── orchestrator.ts          # Central orchestrator
-│   ├── types.ts                 # Pipeline types
-│   ├── scanner.ts               # Market scanner
-│   └── filters.ts               # Hard filters
-├── hooks/
-│   └── use-pipeline.ts          # Pipeline state hook
-├── lib/
-│   ├── ai.ts                    # AI integration
-│   ├── calc.ts                  # Trading calculations
-│   ├── indicators.ts            # Technical indicators
-│   ├── prompts.ts               # AI prompts
-│   ├── stock-filter.ts          # Applied stock filter
-│   ├── quote.ts                 # Yahoo Finance integration
-│   ├── storage.ts               # localStorage helpers
-│   ├── types.ts                 # TypeScript types
-│   └── utils.ts                 # Utility functions
-```
-
-### Common Tasks
-
-**Add New Indicator:**
-1. Update `src/lib/indicators.ts`
-2. Update types di `src/lib/types.ts`
-3. Add ke pipeline calculation di `src/pipeline/orchestrator.ts`
-
-**Modify Prompt:**
-1. Edit `src/lib/prompts.ts`
-2. Atau gunakan Prompt Editor di UI
-
-**Add New Module:**
-1. Create component di `src/components/`
-2. Update types dan prompts
-3. Add ke `MODULE_META` di `src/components/modules.tsx`
-
-**Fix Calculation:**
-1. Check `src/lib/calc.ts` untuk formula yang benar
-2. Validate dengan edge cases
-
-## ⚠️ Important Notes
-
-### Disclaimer
-- Aplikasi ini **bukan** memberi sinyal beli/jual
-- Semua output AI hanya alat bantu analisis
-- **Final decision tetap di tangan trader**
-- Author tidak bertanggung jawab atas loss yang terjadi
-
-### Data Limitations
-- **Yahoo Finance**: Primary source, rate-limit IP datacenter
-- **Manual Fields**: Foreign Flow, Broker Accumulation, Sector Strength harus di-input manual
-- **Production**: Run lokal untuk menghindari Yahoo Finance rate limits
-
-### Best Practices
-- Selalu gunakan risk management (stop loss, position sizing)
-- Check volume sebelum entry
-- Perhatikan market context (IHSG trend, sector rotation)
-- Jangan FOMO, tunggu confirmation
-- Review trade journal untuk improvement
-
-## 📝 License
-
-MIT License - Lihat [LICENSE](LICENSE) untuk details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Silakan:
-
-1. Fork repository
-2. Create branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push ke branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
-
-## 📧 Contact
-
-Muhammad Adriyuliansya - [@adriyuliansya](https://github.com/muhammadadriyuliansya)
-
-Project Link: [https://github.com/muhammadadriyuliansya/idx-ai-trading-assistant](https://github.com/muhammadadriyuliansya/idx-ai-trading-assistant)
-
----
-
-**IDX AI Trading Assistant** - Bukan auto trading. Bukan prediksi harga. Decision tetap di tangan trader.
-hehehe
+- Split `src/pipeline/orchestrator.ts` into market-data, legacy deterministic agents, scoring, and result assembly modules.
+- Split the remaining main dashboard view into route-level sections once product behavior is stable.
+- Add Playwright smoke tests for the scanner and full-analysis happy path.
+- Replace Yahoo Finance with a dedicated market-data provider if the app is used in production every trading day.

@@ -1,16 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
 import {
   GitCompare,
   Loader2,
   TrendingUp,
   TrendingDown,
   BarChart3,
-  Activity,
-  Percent,
-  DollarSign,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

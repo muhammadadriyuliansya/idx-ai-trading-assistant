@@ -6,15 +6,9 @@ import {
   Plus,
   Search,
   Trash2,
-  Edit2,
   Bell,
   BellOff,
-  TrendingUp,
-  TrendingDown,
-  BarChart3,
   Eye,
-  Clock,
-  Target,
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +51,6 @@ export function WatchlistTab() {
   
   const [showAddItem, setShowAddItem] = useState(false);
   const [showAddAlert, setShowAddAlert] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [filterTicker, setFilterTicker] = useState("");
 
   const [newItem, setNewItem] = useState({

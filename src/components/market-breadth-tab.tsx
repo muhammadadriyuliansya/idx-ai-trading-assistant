@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  TrendingUp,
-  TrendingDown,
   Activity,
   BarChart3,
   Loader2,
@@ -17,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { runFullAnalysis } from "@/pipeline/orchestrator";
 import type { AnalysisPipeline } from "@/pipeline/types";
-import { formatCurrency } from "@/lib/utils";
 
 interface SectorData {
   name: string;
@@ -208,7 +205,6 @@ export function MarketBreadthTab() {
           <div className="space-y-4">
             <h3 className="font-semibold">Sector Breakdown</h3>
             {sectors.map((sector) => {
-              const sectorTotal = sector.analysis.size;
               const sectorAdvance = sector.advanceCount;
               const sectorDecline = sector.declineCount;
               const sectorRatio = sectorDecline > 0 ? sectorAdvance / sectorDecline : sectorAdvance;

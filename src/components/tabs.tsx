@@ -1,16 +1,13 @@
 "use client";
 
-import { useState } from "react";
 import { motion } from "framer-motion";
 import { 
   Search, 
   BarChart3, 
   Briefcase, 
   Eye, 
-  Settings,
   ScanLine,
   GitCompare,
-  Activity,
   Layers
 } from "lucide-react";
 import { cn } from "@/lib/utils";

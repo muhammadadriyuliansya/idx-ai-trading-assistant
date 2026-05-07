@@ -210,10 +210,10 @@ function calculateSetupScoreFromData(
 function getModeDefaults(mode: ScanCandidate['mode']) {
   if (mode === 'day') {
     return {
-      minVolumeRatio: 0.8,
-      minRR: 1.2,
-      minAvgVolume: 500000,
-      minPriceRange: 0.01,
+      minVolumeRatio: 1.5,
+      minRR: 2.0,
+      minAvgVolume: 1000000,
+      minPriceRange: 0.02,
       requireBullishTrend: false,
     }
   }
@@ -257,12 +257,12 @@ function buildNextTrigger(
   rr: number,
   mode: ScanCandidate['mode'],
 ): string {
-  const minRr = mode === 'day' ? 1.2 : mode === 'swing' ? 1.5 : 2
-  const minVolume = mode === 'day' ? 1.2 : mode === 'swing' ? 1 : 1.5
+  const minRr = mode === 'day' ? 2 : mode === 'swing' ? 1.5 : 2
+  const minVolume = mode === 'day' ? 1.5 : mode === 'swing' ? 1 : 1.5
   if (rr < minRr) return `Wait for price closer to support ${marketData.support.toFixed(0)} or resistance expansion.`
   if (indicators.volumeRatio < minVolume) return `Wait for volume ratio above ${minVolume.toFixed(1)}x.`
-  if (mode === 'day' && marketData.currentPrice < indicators.vwap) return `Wait for reclaim above VWAP ${indicators.vwap.toFixed(0)}.`
-  if (mode !== 'day' && indicators.trend !== 'bullish') return `Wait for close above EMA20 ${indicators.ema20.toFixed(0)}.`
+  if (mode === 'day') return `Review only until intraday feed, spread, and VWAP confirmation are available.`
+  if (indicators.trend !== 'bullish') return `Wait for close above EMA20 ${indicators.ema20.toFixed(0)}.`
   return `Break or hold above resistance ${marketData.resistance.toFixed(0)} with volume.`
 }
 

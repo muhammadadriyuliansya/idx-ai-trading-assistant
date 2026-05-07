@@ -7,10 +7,21 @@ import { Progress } from "@/components/ui/progress";
 import { Metric } from "@/components/shared";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import type { AnalysisPipeline } from "@/pipeline/types";
+import type { BadgeTone } from "@/features/trading/types";
 import {
   exportFullBrief,
   exportAIReadyPrompt,
 } from "@/lib/export";
+import { CollapsibleSection } from "@/components/pipeline-viewer/collapsible-section";
+import {
+  AnalystAgreementMeter,
+  ConfidenceHeatmap,
+  ConflictIndicator,
+} from "@/components/pipeline-viewer/analyst-metrics";
+import {
+  formatNullable,
+  formatPercent,
+} from "@/components/pipeline-viewer/formatters";
 import {
   TrendingUp,
   TrendingDown,
@@ -21,8 +32,6 @@ import {
   Copy,
   Download,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
   AlertTriangle,
   CheckCircle2,
   Eye,
@@ -35,167 +44,6 @@ interface PipelineViewerProps {
   onAnalyzeWithAI?: (prompt: string) => void;
 }
 
-function formatNullable(value: number | null | undefined, digits = 2): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return value.toFixed(digits);
-}
-
-function fmtPct(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return (value * 100).toFixed(2) + "%";
-}
-
-type BadgeTone = "neutral" | "blue" | "emerald" | "amber" | "red" | "violet";
-
-// ============================================================================
-// COLLAPSIBLE SECTION COMPONENT
-// ============================================================================
-
-function CollapsibleSection({
-  title,
-  icon,
-  badge,
-  badgeTone,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  badge?: string;
-  badgeTone?: BadgeTone;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <Card className="border-zinc-800/60 bg-zinc-950/60">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-4 hover:bg-zinc-900/40 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="text-zinc-400">{icon}</div>
-          <span className="text-sm font-semibold text-zinc-200">{title}</span>
-          {badge && (
-            <Badge tone={badgeTone ?? "neutral"} className="text-[10px]">
-              {badge}
-            </Badge>
-          )}
-        </div>
-        {open ? (
-          <ChevronUp className="h-4 w-4 text-zinc-500" />
-        ) : (
-          <ChevronDown className="h-4 w-4 text-zinc-500" />
-        )}
-      </button>
-      {open && <div className="px-4 pb-4">{children}</div>}
-    </Card>
-  );
-}
-
-// ============================================================================
-// CONFIDENCE HEATMAP
-// ============================================================================
-
-function ConfidenceHeatmap({
-  reports,
-}: {
-  reports: AnalysisPipeline["analystReports"];
-}) {
-  return (
-    <div className="space-y-2">
-      {reports.map((r) => {
-        const pct = Math.min(100, Math.max(0, r.score));
-        const tone =
-          pct >= 70 ? "emerald" : pct >= 50 ? "amber" : "red";
-        return (
-          <div key={r.agent} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-400">{r.agent}</span>
-              <span className={`font-mono font-semibold ${
-                tone === "emerald" ? "text-emerald-400" :
-                tone === "amber" ? "text-amber-400" : "text-red-400"
-              }`}>{r.score}/100</span>
-            </div>
-            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  tone === "emerald" ? "bg-emerald-500" :
-                  tone === "amber" ? "bg-amber-500" : "bg-red-500"
-                }`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-zinc-500">
-              <span className="capitalize">{r.bias}</span>
-              <span>Confidence: {r.confidence}%</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ============================================================================
-// ANALYST AGREEMENT METER
-// ============================================================================
-
-function AnalystAgreementMeter({ reports }: { reports: AnalysisPipeline["analystReports"] }) {
-  if (reports.length < 2) return null;
-
-  const bullishCount = reports.filter((r) => r.bias === "bullish").length;
-  const bearishCount = reports.filter((r) => r.bias === "bearish").length;
-  const neutralCount = reports.filter((r) => r.bias === "neutral").length;
-  const total = reports.length;
-
-  const agreementPct = total > 1
-    ? Math.round((Math.max(bullishCount, bearishCount) / total) * 100)
-    : 100;
-
-  const tone = agreementPct >= 70 ? "emerald" : agreementPct >= 50 ? "amber" : "red";
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-zinc-400">Analyst Agreement</span>
-        <span className={`font-mono font-semibold ${
-          tone === "emerald" ? "text-emerald-400" :
-          tone === "amber" ? "text-amber-400" : "text-red-400"
-        }`}>{agreementPct}%</span>
-      </div>
-      <Progress value={agreementPct} tone={tone} className="h-2" />
-      <div className="flex gap-3 text-[10px] text-zinc-500">
-        <span className="text-emerald-400">▲ {bullishCount} Bullish</span>
-        <span className="text-red-400">▼ {bearishCount} Bearish</span>
-        <span>○ {neutralCount} Neutral</span>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// CONFLICT INDICATOR
-// ============================================================================
-
-function ConflictIndicator({ conflictScore }: { conflictScore: number }) {
-  const tone = conflictScore > 60 ? "red" : conflictScore > 30 ? "amber" : "emerald";
-  const label = conflictScore > 60 ? "High Conflict" : conflictScore > 30 ? "Moderate" : "Low Conflict";
-
-  return (
-    <div className="flex items-center gap-2">
-      {tone === "red" && <AlertTriangle className="h-4 w-4 text-red-400" />}
-      {tone === "emerald" && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
-      <span className="text-xs text-zinc-400">{label}</span>
-      <span className={`font-mono text-xs font-semibold ${
-        tone === "red" ? "text-red-400" :
-        tone === "amber" ? "text-amber-400" : "text-emerald-400"
-      }`}>{conflictScore}%</span>
-    </div>
-  );
-}
-
-// ============================================================================
 // MAIN PIPELINE VIEWER
 // ============================================================================
 
@@ -216,6 +64,7 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
     newsIntelligence,
     socialSentiment,
     macroContext,
+    riskGovernor,
   } = pipeline;
 
   const [showExportModal, setShowExportModal] = useState(false);
@@ -244,6 +93,7 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
     WAIT: "blue",
     WATCHLIST: "amber",
     REJECT: "red",
+    NO_TRADE: "red",
   };
 
   const regimeColor: Record<string, BadgeTone> = {
@@ -362,6 +212,61 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
               )}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className={`border ${
+        riskGovernor.entryAllowed
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : "border-amber-500/30 bg-amber-500/5"
+      }`}>
+        <CardContent className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-xl">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-zinc-500">
+                <Shield className="h-3.5 w-3.5" />
+                Daily Capital Guard
+                <Badge tone={riskGovernor.entryAllowed ? "emerald" : "amber"} className="text-[10px]">
+                  {riskGovernor.status}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm text-zinc-300">
+                {riskGovernor.entryAllowed
+                  ? "Entry is allowed by the daily guard, with reduced risk sizing enforced."
+                  : `No trade state: ${riskGovernor.noTradeReason ?? "one or more guard gates failed"}.`}
+              </p>
+              {riskGovernor.notes.length > 0 && (
+                <div className="mt-2 text-xs text-zinc-500">
+                  {riskGovernor.notes.slice(0, 2).join(" ")}
+                </div>
+              )}
+            </div>
+
+            <div className="grid flex-1 grid-cols-2 gap-2 text-xs sm:grid-cols-5">
+              <Metric label="Mode" value={riskGovernor.mode.toUpperCase()} />
+              <Metric label="Daily P&L" value={`${riskGovernor.realizedPct.toFixed(2)}%`} />
+              <Metric label="Trades" value={`${riskGovernor.tradesTaken}/${riskGovernor.maxTrades}`} />
+              <Metric label="Risk/Trade" value={`${riskGovernor.effectiveRiskPerTrade.toFixed(2)}%`} />
+              <Metric label="Risk Left" value={formatCurrency(riskGovernor.remainingDailyRisk)} />
+            </div>
+          </div>
+
+          {riskGovernor.gates.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {riskGovernor.gates.map((gate) => (
+                <span
+                  key={gate.label}
+                  className={`rounded border px-2 py-1 text-[10px] ${
+                    gate.passed
+                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                      : "border-red-500/20 bg-red-500/10 text-red-300"
+                  }`}
+                >
+                  {gate.label}: {gate.reason}
+                </span>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -756,10 +661,10 @@ export function PipelineViewer({ pipeline, onAnalyzeWithAI }: PipelineViewerProp
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <Metric label="PER (Trailing)" value={formatNullable(fundamental.per) + "x"} />
             <Metric label="PBV" value={formatNullable(fundamental.pbv) + "x"} />
-            <Metric label="ROE" value={fmtPct(fundamental.roe)} />
+            <Metric label="ROE" value={formatPercent(fundamental.roe)} />
             <Metric label="DER" value={formatNullable(fundamental.der)} />
-            <Metric label="EPS Growth" value={fmtPct(fundamental.earningsGrowth)} />
-            <Metric label="Div Yield" value={fmtPct(fundamental.dividendYield)} />
+            <Metric label="EPS Growth" value={formatPercent(fundamental.earningsGrowth)} />
+            <Metric label="Div Yield" value={formatPercent(fundamental.dividendYield)} />
           </div>
         ) : (
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">

@@ -247,22 +247,22 @@ export function filterAppliedStocks(
   return stocks.map(stock => analyzeStockForApplied(stock.ticker, stock.scanner, config));
 }
 
-export function getAppliedOnly(
-  results: AppliedStockResult[]
-): AppliedStockResult[] {
+export function getAppliedOnly<T extends { isApplied: boolean }>(
+  results: T[]
+): T[] {
   return results.filter(r => r.isApplied);
 }
 
-export function getRejectedOnly(
-  results: AppliedStockResult[]
-): AppliedStockResult[] {
+export function getRejectedOnly<T extends { isApplied: boolean }>(
+  results: T[]
+): T[] {
   return results.filter(r => !r.isApplied);
 }
 
-export function sortByRR(results: AppliedStockResult[]): AppliedStockResult[] {
+export function sortByRR<T extends { rr: number }>(results: T[]): T[] {
   return [...results].sort((a, b) => b.rr - a.rr);
 }
 
-export function sortByProfit(results: AppliedStockResult[]): AppliedStockResult[] {
+export function sortByProfit<T extends { estimatedProfit: number }>(results: T[]): T[] {
   return [...results].sort((a, b) => b.estimatedProfit - a.estimatedProfit);
 }

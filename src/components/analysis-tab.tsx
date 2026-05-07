@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search,
@@ -9,25 +9,20 @@ import {
   Copy,
   Download,
   Brain,
-  ClipboardCheck,
-  ChevronRight,
-  TrendingUp,
-  TrendingDown,
-  Clock,
-  Target,
-  Shield,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { PipelineViewer } from "@/components/pipeline-viewer";
 import { useLocalStorage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import { exportAIReadyPrompt, exportFullBrief } from "@/lib/export";
 import { runFullAnalysis, type AnalysisRunOptions } from "@/pipeline/orchestrator";
-import type { AnalysisPipeline } from "@/pipeline/types";
+import { buildDailyGuardSnapshot, type TradeJournalRecord } from "@/lib/risk-governor";
+import type { AnalysisPipeline, TradingMode } from "@/pipeline/types";
 
 interface AnalysisTabProps {
   initialTicker?: string;
@@ -37,20 +32,23 @@ const STORAGE_KEYS = {
   lastTicker: "idxai.last.ticker",
   lastCapital: "idxai.last.capital",
   lastRisk: "idxai.last.risk",
+  scanMode: "idxai.scan.mode",
   aiOpinions: "idxai.ai.opinions",
+  tradeHistory: "idxai.portfolio.history",
 };
 
 export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
   const [ticker, setTicker] = useLocalStorage(STORAGE_KEYS.lastTicker, initialTicker || "");
   const [capital, setCapital] = useLocalStorage(STORAGE_KEYS.lastCapital, "10000000");
-  const [riskPerTrade, setRiskPerTrade] = useLocalStorage(STORAGE_KEYS.lastRisk, "1");
+  const [riskPerTrade, setRiskPerTrade] = useLocalStorage(STORAGE_KEYS.lastRisk, "0.5");
+  const [mode, setMode] = useLocalStorage<TradingMode>(STORAGE_KEYS.scanMode, "swing");
+  const [tradeHistory] = useLocalStorage<TradeJournalRecord[]>(STORAGE_KEYS.tradeHistory, []);
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisPipeline | null>(null);
   const [modalTitle, setModalTitle] = useState("");
   const [modalText, setModalText] = useState("");
-  const [aiDraft, setAiDraft] = useState("");
   const [showModal, setShowModal] = useState(false);
 
   const runAnalysis = async () => {
@@ -70,7 +68,9 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
 
       const options: AnalysisRunOptions = {
         capital: parseFloat(capital) || 10000000,
-        riskPerTrade: parseFloat(riskPerTrade) || 1,
+        riskPerTrade: parseFloat(riskPerTrade) || 0.5,
+        mode,
+        dailyGuardSnapshot: buildDailyGuardSnapshot(tradeHistory),
       };
 
       const result = await runFullAnalysis(symbol, options);
@@ -108,7 +108,7 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
       {/* Input Form */}
       <Card className="border-zinc-800">
         <CardContent className="p-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <div>
               <Label className="text-zinc-400">Ticker</Label>
               <Input
@@ -137,6 +137,13 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
                 onChange={(e) => setRiskPerTrade(e.target.value)}
                 className="font-mono"
               />
+            </div>
+            <div>
+              <Label className="text-zinc-400">Mode</Label>
+              <Select value={mode} onChange={(e) => setMode(e.target.value as TradingMode)}>
+                <option value="swing">Swing</option>
+                <option value="day">Daytrade review</option>
+              </Select>
             </div>
             <div className="flex items-end">
               <Button

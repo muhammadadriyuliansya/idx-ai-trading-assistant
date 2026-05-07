@@ -35,111 +35,43 @@ import { useLocalStorage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import { exportAIReadyPrompt, exportFullBrief } from "@/lib/export";
 import { getDefaultIDXTickers, runMarketScan } from "@/pipeline/scanner";
+import { runFullAnalysis } from "@/pipeline/orchestrator";
 import {
-  runFullAnalysis,
-  type AnalysisRunOptions,
-} from "@/pipeline/orchestrator";
-import {
-  DEFAULT_SMALL_CAPITAL_CONFIG,
-  filterAppliedStocks,
-  getAppliedOnly,
-  type TradingConfig,
-  type AppliedStockResult,
-} from "@/lib/stock-filter";
-import { computeRisk } from "@/lib/calc";
+  buildDailyGuardSnapshot,
+  type TradeJournalRecord,
+} from "@/lib/risk-governor";
 import type { AnalysisPipeline, ScanCandidate } from "@/pipeline/types";
 import { TabNavigation, type TabId } from "@/components/tabs";
 import { ScannerTab } from "@/components/scanner-tab";
 import { AnalysisTab } from "@/components/analysis-tab";
 import { PortfolioTab } from "@/components/portfolio-tab";
+import { TextPreviewModal } from "@/components/text-preview-modal";
 import { WatchlistTab } from "@/components/watchlist-tab";
 import { MultiTimeframeTab } from "@/components/timeframe-tab";
 import { ComparisonTab } from "@/components/comparison-tab";
 import { MarketBreadthTab } from "@/components/market-breadth-tab";
 import { ThemeToggle } from "@/components/theme-toggle";
-
-const STORAGE_KEYS = {
-  lastTicker: "idxai.last.ticker",
-  lastCapital: "idxai.last.capital",
-  lastRisk: "idxai.last.risk",
-  watchlist: "idxai.watchlist.auto",
-  alerts: "idxai.alerts.local",
-  aiOpinions: "idxai.ai.opinions",
-  scanMode: "idxai.scan.mode",
-} as const;
-
-const SCAN_CONFIG = {
-  minSetupScore: 50,
-  maxResults: 20,
-} as const;
-
-type BadgeTone = "neutral" | "blue" | "emerald" | "amber" | "red" | "violet";
-type ScanMode = ScanCandidate["mode"];
-type AlertCondition = "PRICE_ABOVE_RESISTANCE" | "VOLUME_ABOVE_1_5" | "RR_ABOVE_2" | "WATCHLIST_VALID";
-
-interface WatchlistItem {
-  ticker: string;
-  reason: string;
-  trigger: string;
-  invalidation: string;
-  addedAt: number;
-  status: ScanCandidate["status"];
-  setupScore: number;
-}
-
-interface LocalAlert {
-  id: string;
-  ticker: string;
-  condition: AlertCondition;
-  targetLabel: string;
-  createdAt: number;
-  triggeredAt?: number;
-}
-
-interface AiOpinion {
-  ticker: string;
-  text: string;
-  savedAt: number;
-}
-
-const candidateTone: Record<ScanCandidate["status"], BadgeTone> = {
-  VALID: "emerald",
-  WATCHLIST: "amber",
-  REJECT: "red",
-};
-
-const actionTone: Record<string, BadgeTone> = {
-  APPROVED: "emerald",
-  WATCHLIST: "amber",
-  REDUCE_SIZE: "violet",
-  REJECTED: "red",
-};
-
-const healthTone: Record<string, BadgeTone> = {
-  GOOD: "emerald",
-  DEGRADED: "amber",
-  STALE: "amber",
-  BAD: "red",
-};
-
-function parsePositiveNumber(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function getPipelineOptions(capital: string, riskPerTrade: string): AnalysisRunOptions | null {
-  const parsedCapital = parsePositiveNumber(capital);
-  const parsedRisk = parsePositiveNumber(riskPerTrade);
-
-  if (!parsedCapital || !parsedRisk || parsedRisk > 10) {
-    return null;
-  }
-
-  return {
-    capital: parsedCapital,
-    riskPerTrade: parsedRisk,
-  };
-}
+import { STORAGE_KEYS, SCAN_CONFIG } from "@/config/app";
+import { actionTone, candidateTone, healthTone } from "@/features/trading/display";
+import {
+  buildImprovementText,
+  getPipelineOptions,
+  normalizeAnalysisMode,
+  parsePositiveNumber,
+} from "@/features/trading/analysis";
+import {
+  buildTradingConfig,
+  filterAppliedScanResults,
+} from "@/features/trading/applied-filter";
+import {
+  DashboardCard,
+  ExplainRow,
+  MetricChip,
+  StatusRow,
+  TinyScore,
+} from "@/features/trading/dashboard-components";
+import { evaluateAlerts, getAlertLabel, mergeWatchlist } from "@/features/trading/watchlist";
+import type { AiOpinion, AlertCondition, LocalAlert, ScanMode, WatchlistItem } from "@/features/trading/types";
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabId>("scanner");
@@ -150,7 +82,7 @@ export default function HomePage() {
   );
   const [riskPerTrade, setRiskPerTrade] = useLocalStorage(
     STORAGE_KEYS.lastRisk,
-    "1",
+    "0.5",
   );
 
   const [scanLoading, setScanLoading] = useState(false);
@@ -159,63 +91,19 @@ export default function HomePage() {
   const [scanCompletedAt, setScanCompletedAt] = useState<number | null>(null);
   const [showAppliedOnly, setShowAppliedOnly] = useState(true);
 
-  const tradingConfig: TradingConfig = useMemo(() => ({
-    capital: parseInt(capital) || 10_000_000,
-    riskPerTrade: parseFloat(riskPerTrade) || 1,
-    targetProfit: parseFloat(riskPerTrade) || 1,
-  }), [capital, riskPerTrade]);
+  const tradingConfig = useMemo(
+    () => buildTradingConfig(capital, riskPerTrade),
+    [capital, riskPerTrade],
+  );
 
   const filteredResults = useMemo(() => {
-    if (!showAppliedOnly || scanResults.length === 0) return scanResults;
-    
-    const appliedResults: AppliedStockResult[] = scanResults.map(candidate => {
-      const price = candidate.marketData.currentPrice;
-      const support = candidate.marketData.support || price * 0.98;
-      const resistance = candidate.marketData.resistance || price * 1.02;
-      
-      const riskResult = computeRisk({
-        ticker: candidate.ticker,
-        currentPrice: price.toString(),
-        support: support.toString(),
-        resistance: resistance.toString(),
-        atr: (price * 0.02).toString(),
-        capital: capital,
-        riskPerTrade: riskPerTrade,
-      });
-
-      const rr = riskResult 
-        ? (resistance - price) / (price - support)
-        : candidate.rr;
-
-      const maxLoss = riskResult?.maxLoss ?? 0;
-      const positionValue = riskResult?.positionValue ?? 0;
-      const estimatedProfit = positionValue * (tradingConfig.targetProfit / 100);
-      const isApplied = 
-        rr >= 1.0 &&
-        maxLoss > 0 &&
-        maxLoss <= parseInt(capital) * (parseFloat(riskPerTrade) / 100) * 2 &&
-        positionValue <= parseInt(capital) * 0.5 &&
-        estimatedProfit >= 10000;
-
-      return {
-        ticker: candidate.ticker,
-        isApplied,
-        reasons: isApplied ? ["All criteria met"] : [rr < 1.0 ? "RR < 1.0" : "Failed capital rules"],
-        config: tradingConfig,
-        riskResult,
-        rr,
-        setupScore: candidate.setupScore,
-        maxLoss,
-        positionValue,
-        lotSize: riskResult?.lots ?? 0,
-        estimatedProfit,
-      };
-    });
-
-    return getAppliedOnly(appliedResults).map(r => {
-      const original = scanResults.find(s => s.ticker === r.ticker);
-      return original!;
-    }).filter(Boolean);
+    return filterAppliedScanResults(
+      scanResults,
+      showAppliedOnly,
+      capital,
+      riskPerTrade,
+      tradingConfig,
+    );
   }, [scanResults, showAppliedOnly, capital, riskPerTrade, tradingConfig]);
 
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -224,6 +112,7 @@ export default function HomePage() {
 
   const [modalTitle, setModalTitle] = useState("");
   const [modalText, setModalText] = useState("");
+  const [modalDownloadName, setModalDownloadName] = useState("");
   const [aiDraft, setAiDraft] = useState("");
 
   const [watchlist, setWatchlist] = useLocalStorage<WatchlistItem[]>(
@@ -241,6 +130,10 @@ export default function HomePage() {
   const [scanMode, setScanMode] = useLocalStorage<ScanMode>(
     STORAGE_KEYS.scanMode,
     "swing",
+  );
+  const [tradeHistory] = useLocalStorage<TradeJournalRecord[]>(
+    STORAGE_KEYS.tradeHistory,
+    [],
   );
 
   const defaultTickerCount = useMemo(() => getDefaultIDXTickers().length, []);
@@ -334,7 +227,11 @@ export default function HomePage() {
     setAnalysisError(null);
 
     try {
-      const result = await runFullAnalysis(nextTicker, options);
+      const result = await runFullAnalysis(nextTicker, {
+        ...options,
+        mode: normalizeAnalysisMode(scanMode),
+        dailyGuardSnapshot: buildDailyGuardSnapshot(tradeHistory),
+      });
       setAnalysis(result);
       setAiDraft("");
     } catch (err) {
@@ -353,6 +250,9 @@ export default function HomePage() {
   const openTextModal = (title: string, text: string) => {
     setModalTitle(title);
     setModalText(text);
+    setModalDownloadName(
+      `${title.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.txt`,
+    );
   };
 
   const addAlert = (candidate: ScanCandidate, condition: AlertCondition) => {
@@ -1041,185 +941,14 @@ export default function HomePage() {
         )}
       </main>
 
-      {modalText && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="flex max-h-[84vh] w-full max-w-3xl flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-950 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="font-semibold text-zinc-100">{modalTitle}</h3>
-              <Button variant="ghost" size="sm" onClick={() => setModalText("")}>
-                Close
-              </Button>
-            </div>
-            <textarea
-              value={modalText}
-              readOnly
-              className="min-h-[420px] flex-1 resize-none rounded-lg border border-zinc-800 bg-black/40 p-4 font-mono text-xs text-emerald-200 outline-none"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button
-                className="flex-1"
-                onClick={() => navigator.clipboard.writeText(modalText)}
-              >
-                <Copy className="h-4 w-4" />
-                Copy
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const blob = new Blob([modalText], { type: "text/plain" });
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement("a");
-                  link.href = url;
-                  link.download = `${modalTitle.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.txt`;
-                  link.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <TextPreviewModal
+        open={Boolean(modalText)}
+        title={modalTitle}
+        text={modalText}
+        onClose={() => setModalText("")}
+        downloadName={modalDownloadName}
+      />
     </div>
   );
 }
 
-function MetricChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/50 p-2">
-      <div className="truncate text-[9px] uppercase tracking-wider text-zinc-500">
-        {label}
-      </div>
-      <div className="mt-1 truncate font-mono text-xs font-semibold text-zinc-200">
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function DashboardCard({
-  icon,
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  hint: string;
-  tone: BadgeTone;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-zinc-400">{icon}</div>
-          <Badge tone={tone}>{label}</Badge>
-        </div>
-        <div className="mt-4 text-2xl font-semibold">{value}</div>
-        <div className="mt-1 text-xs text-zinc-500">{hint}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TinyScore({ label, value, max }: { label: string; value: number; max: number }) {
-  const pct = max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
-  return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-950/50 p-1.5">
-      <div className="flex items-center justify-between text-[9px] text-zinc-500">
-        <span>{label}</span>
-        <span>{value}</span>
-      </div>
-      <div className="mt-1 h-1 rounded-full bg-zinc-800">
-        <div className="h-full rounded-full bg-blue-400" style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function ExplainRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
-      <div className="mt-1 text-zinc-300">{value}</div>
-    </div>
-  );
-}
-
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 border-b border-zinc-900 pb-2 last:border-0 last:pb-0">
-      <span className="text-zinc-500">{label}</span>
-      <span className="font-mono text-zinc-200">{value}</span>
-    </div>
-  );
-}
-
-function mergeWatchlist(prev: WatchlistItem[], candidates: ScanCandidate[]): WatchlistItem[] {
-  const nextItems = candidates
-    .filter((item) => item.status === "WATCHLIST" || item.status === "VALID")
-    .map((item) => ({
-      ticker: item.ticker,
-      reason: item.reason,
-      trigger: item.nextTrigger,
-      invalidation: item.invalidation,
-      addedAt: Date.now(),
-      status: item.status,
-      setupScore: item.setupScore,
-    }));
-
-  const byTicker = new Map<string, WatchlistItem>();
-  [...nextItems, ...prev].forEach((item) => {
-    if (!byTicker.has(item.ticker)) byTicker.set(item.ticker, item);
-  });
-
-  return [...byTicker.values()].slice(0, 30);
-}
-
-function evaluateAlerts(prev: LocalAlert[], candidates: ScanCandidate[]): LocalAlert[] {
-  const byTicker = new Map(candidates.map((item) => [item.ticker, item]));
-
-  return prev.map((alert) => {
-    if (alert.triggeredAt) return alert;
-    const candidate = byTicker.get(alert.ticker);
-    if (!candidate) return alert;
-    const triggered = isAlertTriggered(alert.condition, candidate);
-    return triggered ? { ...alert, triggeredAt: Date.now() } : alert;
-  });
-}
-
-function isAlertTriggered(condition: AlertCondition, candidate: ScanCandidate): boolean {
-  if (condition === "PRICE_ABOVE_RESISTANCE") {
-    return candidate.marketData.currentPrice >= candidate.marketData.resistance;
-  }
-  if (condition === "VOLUME_ABOVE_1_5") {
-    return candidate.volumeRatio >= 1.5;
-  }
-  if (condition === "RR_ABOVE_2") {
-    return candidate.rr >= 2;
-  }
-  return candidate.status === "VALID";
-}
-
-function getAlertLabel(candidate: ScanCandidate, condition: AlertCondition): string {
-  if (condition === "PRICE_ABOVE_RESISTANCE") return `Price breaks resistance ${candidate.marketData.resistance.toFixed(0)}`;
-  if (condition === "VOLUME_ABOVE_1_5") return "Volume ratio rises above 1.5x";
-  if (condition === "RR_ABOVE_2") return "Risk/reward improves above 2.0";
-  return "Watchlist candidate becomes valid";
-}
-
-function buildImprovementText(analysis: AnalysisPipeline): string {
-  const improvements: string[] = [];
-  if (analysis.indicators.trend !== "bullish") improvements.push("trend must turn bullish");
-  if (analysis.indicators.volumeRatio < 1.5) improvements.push("volume must rise above 1.5x");
-  if (analysis.risk.rr1 < 2) improvements.push("RR should improve above 2.0");
-  if (analysis.context.marketRegime === "DEFENSIVE") improvements.push("IHSG regime should stop being defensive");
-
-  return improvements.length > 0
-    ? improvements.join(", ")
-    : "Setup already meets the main improvement gates; execution discipline is the key constraint.";
-}

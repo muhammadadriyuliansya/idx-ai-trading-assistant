@@ -107,7 +107,7 @@ export interface DebateResult {
 }
 
 export interface DecisionResult {
-  finalDecision: 'BUY_NOW' | 'WAIT' | 'WATCHLIST' | 'REJECT'
+  finalDecision: 'BUY_NOW' | 'WAIT' | 'WATCHLIST' | 'REJECT' | 'NO_TRADE'
   confidenceScore: number
   successProbability: number
   keyEdge: string
@@ -210,6 +210,46 @@ export interface PortfolioDecision {
   recommendedRiskPercent: number
 }
 
+export type TradingMode = 'swing' | 'day'
+
+export interface DailyGuardSnapshot {
+  realizedPnl: number
+  tradesTaken: number
+  journalTradeCount?: number
+  journalExpectancyR?: number
+  journalProfitFactor?: number
+  maxDrawdownPct?: number
+}
+
+export interface RiskGovernorGate {
+  label: string
+  passed: boolean
+  reason: string
+}
+
+export interface RiskGovernorState {
+  mode: TradingMode
+  status: 'OPEN' | 'PROFIT_LOCK' | 'TARGET_LOCK' | 'DAILY_STOP' | 'MAX_TRADES' | 'NO_TRADE' | 'REVIEW_ONLY'
+  canOpenNewTrade: boolean
+  entryAllowed: boolean
+  dailyTargetPct: number
+  dailyHardStopPct: number
+  fullStopProfitPct: number
+  maxTrades: number
+  realizedPnl: number
+  realizedPct: number
+  tradesTaken: number
+  remainingDailyRisk: number
+  requestedRiskPerTrade: number
+  baseRiskPerTrade: number
+  effectiveRiskPerTrade: number
+  recommendedRiskPerTrade: number
+  riskQualifiedForScaleUp: boolean
+  gates: RiskGovernorGate[]
+  notes: string[]
+  noTradeReason?: string
+}
+
 // ============================================================================
 // ANALYSIS PIPELINE (Enhanced)
 // ============================================================================
@@ -256,10 +296,11 @@ export interface AnalysisPipeline {
 
   // Phase 5 — Portfolio Manager
   portfolioDecision: PortfolioDecision
+  riskGovernor: RiskGovernorState
 
   finalScore: number
   confidence: 'LOW' | 'MEDIUM' | 'HIGH'
-  status: 'VALID' | 'WATCHLIST' | 'REJECT'
+  status: 'VALID' | 'WATCHLIST' | 'REJECT' | 'NO_TRADE'
 }
 
 // ============================================================================

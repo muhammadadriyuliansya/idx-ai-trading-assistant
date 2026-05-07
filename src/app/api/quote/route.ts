@@ -14,7 +14,6 @@ import {
   swingLevels,
 } from "@/lib/indicators";
 import type { QuoteResult } from "@/lib/types";
-import { validateQuoteResponse } from "@/lib/schemas";
 import { createLogger } from "@/lib/logger";
 
 const logger = createLogger("api:quote");

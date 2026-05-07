@@ -296,7 +296,7 @@ function buildExecutiveSummary(pipeline: AnalysisPipeline, dominantBias: BriefBi
   const weakTrend = indicators.trend === "bearish";
   const weakMomentum = indicators.rsi < 40;
   const weakVolume = indicators.volumeRatio < 1;
-  const rejected = decision.finalDecision === "REJECT" || pipeline.portfolioDecision.action === "REJECTED";
+  const rejected = decision.finalDecision === "REJECT" || decision.finalDecision === "NO_TRADE" || pipeline.portfolioDecision.action === "REJECTED";
 
   if (rejected && weakTrend) {
     return `Setup ${pipeline.ticker} belum layak entry. Skor ${finalScore}/100 berada pada bias ${dominantBias}, trend masih bearish, momentum lemah, dan volume belum cukup mendukung reversal.`;
@@ -325,7 +325,7 @@ export function exportFullBrief(pipeline: AnalysisPipeline): string {
   const news = buildNewsBullets(pipeline);
   const social = buildSocialBullets(pipeline);
   const dominantBias = getDominantBias(pipeline.finalScore);
-  const rejected = pipeline.decision.finalDecision === "REJECT" || pipeline.portfolioDecision.action === "REJECTED";
+  const rejected = pipeline.decision.finalDecision === "REJECT" || pipeline.decision.finalDecision === "NO_TRADE" || pipeline.portfolioDecision.action === "REJECTED";
   const bullCase = dedupeBullets(
     [
       ...pipeline.debateMatrix.bullCase,

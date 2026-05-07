@@ -4,18 +4,14 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
-  Minus,
   TrendingUp,
   TrendingDown,
   Wallet,
   Percent,
-  DollarSign,
   Calendar,
   BarChart3,
-  Edit2,
   Trash2,
   Download,
-  RefreshCw,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocalStorage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
+import { computeJournalAnalytics } from "@/lib/risk-governor";
 
 interface Position {
   id: string;
@@ -58,8 +55,6 @@ export function PortfolioTab() {
   const [tradeHistory, setTradeHistory] = useLocalStorage<TradeHistory[]>(STORAGE_KEYS.tradeHistory, []);
   
   const [showAddPosition, setShowAddPosition] = useState(false);
-  const [showAddTrade, setShowAddTrade] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form states
   const [newPosition, setNewPosition] = useState({
@@ -69,14 +64,6 @@ export function PortfolioTab() {
     notes: "",
     targetPrice: "",
     stopLoss: "",
-  });
-
-  const [newTrade, setNewTrade] = useState({
-    ticker: "",
-    type: "BUY" as "BUY" | "SELL",
-    price: "",
-    shares: "",
-    notes: "",
   });
 
   // Calculate totals
@@ -92,6 +79,7 @@ export function PortfolioTab() {
   const closedPnL = tradeHistory
     .filter(t => t.pnl !== undefined)
     .reduce((sum, t) => sum + (t.pnl || 0), 0);
+  const journalAnalytics = computeJournalAnalytics(tradeHistory);
 
   const handleAddPosition = () => {
     if (!newPosition.ticker || !newPosition.entryPrice || !newPosition.shares) return;
@@ -250,6 +238,44 @@ export function PortfolioTab() {
         </Card>
       </div>
 
+      {/* Journal Analytics */}
+      <Card className="border-blue-500/20 bg-blue-500/5">
+        <CardContent className="p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">Journal Analytics</h3>
+              <p className="text-sm text-zinc-500">
+                Dipakai Daily Capital Guard untuk izin scale-up risk sampai 1%.
+              </p>
+            </div>
+            <Badge tone={journalAnalytics.closedTrades >= 60 && journalAnalytics.expectancyR > 0 ? "emerald" : "amber"}>
+              {journalAnalytics.closedTrades}/60 trades
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+            <JournalMetric label="Win Rate" value={`${journalAnalytics.winRate.toFixed(1)}%`} />
+            <JournalMetric label="Expectancy" value={`${journalAnalytics.expectancyR.toFixed(2)}R`} />
+            <JournalMetric label="Avg R" value={`${journalAnalytics.averageR.toFixed(2)}R`} />
+            <JournalMetric
+              label="Profit Factor"
+              value={Number.isFinite(journalAnalytics.profitFactor) ? journalAnalytics.profitFactor.toFixed(2) : "∞"}
+            />
+            <JournalMetric label="Max DD" value={`${journalAnalytics.maxDrawdownPct.toFixed(0)}R%`} />
+            <JournalMetric label="Best Ticker" value={journalAnalytics.bestTicker} />
+          </div>
+          <div className="mt-3 grid gap-3 text-xs text-zinc-400 lg:grid-cols-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              Worst day: <span className="font-semibold text-zinc-200">{journalAnalytics.worstDay}</span>
+            </div>
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+              Cut loss notes: {journalAnalytics.cutLossReasons.length > 0
+                ? journalAnalytics.cutLossReasons.join("; ")
+                : "Belum ada alasan cut loss yang tercatat."}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Open Positions */}
       <Card className="border-zinc-800">
         <CardContent className="p-4">
@@ -265,7 +291,7 @@ export function PortfolioTab() {
             <div className="space-y-3">
               {positions.map((position) => {
                 const currentValue = (position.currentPrice || position.entryPrice) * position.shares;
-                const pnl = (position.currentPrice || position.entryPrice - position.entryPrice) * position.shares;
+                const pnl = ((position.currentPrice || position.entryPrice) - position.entryPrice) * position.shares;
                 const pnlPct = ((position.currentPrice || position.entryPrice) - position.entryPrice) / position.entryPrice * 100;
 
                 return (
@@ -376,7 +402,7 @@ export function PortfolioTab() {
                       <td className="text-right">{trade.shares}</td>
                       <td className="text-right font-mono">{formatCurrency(trade.price * trade.shares)}</td>
                       <td className={`text-right font-mono ${trade.pnl && trade.pnl >= 0 ? "text-emerald-400" : trade.pnl && trade.pnl < 0 ? "text-red-400" : "text-zinc-500"}`}>
-                        {trade.pnl ? `${trade.pnl >= 0 ? "+" : ""}${formatCurrency(trade.pnl)}` : "-"}
+                        {trade.pnl != null ? `${trade.pnl >= 0 ? "+" : ""}${formatCurrency(trade.pnl)}` : "-"}
                       </td>
                     </tr>
                   ))}
@@ -465,6 +491,15 @@ export function PortfolioTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function JournalMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-1 truncate font-mono text-sm font-semibold text-zinc-100">{value}</div>
     </div>
   );
 }
