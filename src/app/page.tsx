@@ -44,9 +44,7 @@ import type { AnalysisPipeline, ScanCandidate } from "@/pipeline/types";
 import { TabNavigation, type TabId } from "@/components/tabs";
 import { ScannerTab } from "@/components/scanner-tab";
 import { AnalysisTab } from "@/components/analysis-tab";
-import { PortfolioTab } from "@/components/portfolio-tab";
 import { TextPreviewModal } from "@/components/text-preview-modal";
-import { WatchlistTab } from "@/components/watchlist-tab";
 import { MultiTimeframeTab } from "@/components/timeframe-tab";
 import { ComparisonTab } from "@/components/comparison-tab";
 import { MarketBreadthTab } from "@/components/market-breadth-tab";
@@ -335,14 +333,6 @@ export default function HomePage() {
 
         {activeTab === "analysis" && (
           <AnalysisTab initialTicker={ticker} />
-        )}
-
-        {activeTab === "portfolio" && (
-          <PortfolioTab />
-        )}
-
-        {activeTab === "watchlist" && (
-          <WatchlistTab />
         )}
 
         {activeTab === "comparison" && (

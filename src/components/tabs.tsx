@@ -4,15 +4,13 @@ import { motion } from "framer-motion";
 import { 
   Search, 
   BarChart3, 
-  Briefcase, 
-  Eye, 
   ScanLine,
   GitCompare,
   Layers
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type TabId = "scanner" | "analysis" | "portfolio" | "watchlist" | "comparison" | "timeframe" | "breadth" | "settings";
+export type TabId = "scanner" | "analysis" | "comparison" | "timeframe" | "breadth" | "settings";
 
 export interface TabItem {
   id: TabId;
@@ -23,8 +21,6 @@ export interface TabItem {
 export const TABS: TabItem[] = [
   { id: "scanner", label: "Scanner", icon: <Search className="h-4 w-4" /> },
   { id: "analysis", label: "Analisis", icon: <BarChart3 className="h-4 w-4" /> },
-  { id: "portfolio", label: "Portfolio", icon: <Briefcase className="h-4 w-4" /> },
-  { id: "watchlist", label: "Watchlist", icon: <Eye className="h-4 w-4" /> },
   { id: "comparison", label: "Bandingkan", icon: <GitCompare className="h-4 w-4" /> },
   { id: "timeframe", label: "Multi-TF", icon: <ScanLine className="h-4 w-4" /> },
   { id: "breadth", label: "Market", icon: <Layers className="h-4 w-4" /> },
