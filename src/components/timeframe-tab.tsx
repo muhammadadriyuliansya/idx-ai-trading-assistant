@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -9,6 +9,7 @@ import {
   BarChart3,
   Loader2,
   AlertCircle,
+  Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,9 @@ import { Label } from "@/components/ui/label";
 import { formatCurrency } from "@/lib/utils";
 import { runFullAnalysis } from "@/pipeline/orchestrator";
 import type { AnalysisPipeline } from "@/pipeline/types";
+import { useLocalStorage } from "@/lib/storage";
+import { STORAGE_KEYS, DEFAULT_AI_SETTINGS } from "@/config/app";
+import type { AISettings } from "@/lib/types";
 
 type TimeFrame = "1D" | "1W" | "1M";
 
@@ -28,6 +32,27 @@ interface TimeframeData {
   error: string | null;
 }
 
+// Label Bahasa Indonesia untuk komponen multi-timeframe
+const decisionLabels: Record<string, string> = {
+  BUY_NOW: "Beli Sekarang",
+  WAIT: "Tunggu",
+  WATCHLIST: "Pantauan",
+  REJECT: "Lewati",
+  NO_TRADE: "Tidak Trade",
+};
+
+const trendLabels: Record<string, string> = {
+  bullish: "Naik",
+  bearish: "Turun",
+  sideways: "Mendatar",
+};
+
+const timeframeLabels: Record<TimeFrame, string> = {
+  "1D": "Harian",
+  "1W": "Mingguan",
+  "1M": "Bulanan",
+};
+
 export function MultiTimeframeTab() {
   const [ticker, setTicker] = useState("");
   const [data, setData] = useState<Record<TimeFrame, TimeframeData>>({
@@ -36,6 +61,12 @@ export function MultiTimeframeTab() {
     "1M": { timeframe: "1M", analysis: null, loading: false, error: null },
   });
   const [analyzingAll, setAnalyzingAll] = useState(false);
+  const [aiSettings] = useLocalStorage<AISettings>(
+    STORAGE_KEYS.aiSettings,
+    DEFAULT_AI_SETTINGS,
+  );
+  const [synthesis, setSynthesis] = useState<string>("");
+  const [synthesisLoading, setSynthesisLoading] = useState(false);
 
   const analyzeTimeframe = async (tf: TimeFrame) => {
     if (!ticker.trim()) return;
@@ -65,7 +96,7 @@ export function MultiTimeframeTab() {
         [tf]: { 
           ...prev[tf], 
           loading: false, 
-          error: err instanceof Error ? err.message : "Failed" 
+          error: err instanceof Error ? err.message : "Gagal mengambil data" 
         }
       }));
     }
@@ -95,6 +126,113 @@ export function MultiTimeframeTab() {
 
   const summary = getSummary();
 
+  const synthesisEnabled =
+    aiSettings.aiEnabled &&
+    aiSettings.features.multiTfSynthesis &&
+    summary !== null &&
+    summary.results === 3;
+
+  // Auto-sintesis saat 3 TF selesai analisa + fitur aktif.
+  useEffect(() => {
+    if (!synthesisEnabled) {
+      const clearHandle = setTimeout(() => setSynthesis(""), 0);
+      return () => clearTimeout(clearHandle);
+    }
+
+    const entries: TimeFrame[] = ["1D", "1W", "1M"];
+    const summaries = entries
+      .map((tf) => {
+        const a = data[tf].analysis;
+        if (!a) return null;
+        return {
+          label:
+            tf === "1D"
+              ? "Harian (1D)"
+              : tf === "1W"
+                ? "Mingguan (1W)"
+                : "Bulanan (1M)",
+          score: a.finalScore,
+          decision: a.decision.finalDecision,
+          trend: a.indicators.trend,
+          rsi: a.indicators.rsi,
+          volumeRatio: a.indicators.volumeRatio,
+        };
+      })
+      .filter(Boolean) as Array<{
+        label: string;
+        score: number;
+        decision: string;
+        trend: string;
+        rsi: number;
+        volumeRatio: number;
+      }>;
+
+    if (summaries.length < 3) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const run = async () => {
+      setSynthesisLoading(true);
+      try {
+        const model =
+          aiSettings.provider === "ollama"
+            ? aiSettings.ollamaModel
+            : aiSettings.provider === "openai"
+              ? aiSettings.openaiModel
+              : aiSettings.anthropicModel;
+        const res = await fetch("/api/ai/timeframe-synthesis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker: ticker.trim().toUpperCase(),
+            summaries,
+            provider: aiSettings.provider,
+            model,
+            apiKey:
+              aiSettings.provider === "openai"
+                ? aiSettings.openaiKey
+                : aiSettings.provider === "anthropic"
+                  ? aiSettings.anthropicKey
+                  : undefined,
+            baseUrl:
+              aiSettings.provider === "ollama" && aiSettings.ollamaBaseUrl
+                ? aiSettings.ollamaBaseUrl
+                : undefined,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as { synthesis?: string };
+        if (!cancelled && json.synthesis) setSynthesis(json.synthesis);
+      } catch {
+        // silent
+      } finally {
+        if (!cancelled) setSynthesisLoading(false);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      void run();
+    }, 0);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [
+    synthesisEnabled,
+    ticker,
+    data,
+    aiSettings.provider,
+    aiSettings.ollamaModel,
+    aiSettings.openaiModel,
+    aiSettings.anthropicModel,
+    aiSettings.ollamaBaseUrl,
+    aiSettings.openaiKey,
+    aiSettings.anthropicKey,
+  ]);
+
   return (
     <div className="space-y-6">
       {/* Input */}
@@ -119,12 +257,12 @@ export function MultiTimeframeTab() {
               {analyzingAll ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Analyzing...
+                  Menganalisa...
                 </>
               ) : (
                 <>
                   <BarChart3 className="h-4 w-4" />
-                  Analyze All Timeframes
+                  Analisa Semua Timeframe
                 </>
               )}
             </Button>
@@ -138,25 +276,25 @@ export function MultiTimeframeTab() {
           <Card className="border-zinc-800">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold">{summary.results}/3</div>
-              <div className="text-xs text-zinc-500">Timeframes</div>
+              <div className="text-xs text-zinc-500">Timeframe selesai</div>
             </CardContent>
           </Card>
           <Card className="border-zinc-800">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold">{summary.avgScore.toFixed(0)}</div>
-              <div className="text-xs text-zinc-500">Avg Score</div>
+              <div className="text-xs text-zinc-500">Rata-rata Skor</div>
             </CardContent>
           </Card>
           <Card className="border-emerald-500/20 bg-emerald-500/10">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-emerald-400">{summary.buyCount}</div>
-              <div className="text-xs text-zinc-500">BUY Signals</div>
+              <div className="text-xs text-zinc-500">Sinyal Beli</div>
             </CardContent>
           </Card>
           <Card className="border-amber-500/20 bg-amber-500/10">
             <CardContent className="p-4 text-center">
               <div className="text-2xl font-bold text-amber-400">{summary.watchCount}</div>
-              <div className="text-xs text-zinc-500">WATCHLIST</div>
+              <div className="text-xs text-zinc-500">Pantauan</div>
             </CardContent>
           </Card>
         </div>
@@ -172,7 +310,8 @@ export function MultiTimeframeTab() {
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Calendar className="h-5 w-5 text-blue-400" />
-                    <span className="font-semibold">{tf}</span>
+                    <span className="font-semibold">{timeframeLabels[tf]}</span>
+                    <span className="text-xs text-zinc-500">({tf})</span>
                   </div>
                   {tfData.loading && <Loader2 className="h-4 w-4 animate-spin" />}
                 </div>
@@ -197,32 +336,32 @@ export function MultiTimeframeTab() {
                         tfData.analysis.decision.finalDecision === "BUY_NOW" ? "emerald" :
                         tfData.analysis.decision.finalDecision === "WATCHLIST" ? "amber" : "red"
                       }>
-                        {tfData.analysis.decision.finalDecision}
+                        {decisionLabels[tfData.analysis.decision.finalDecision] ?? tfData.analysis.decision.finalDecision}
                       </Badge>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       <div>
-                        <div className="text-zinc-500">Price</div>
+                        <div className="text-zinc-500">Harga</div>
                         <div className="font-mono">{formatCurrency(tfData.analysis.marketData.currentPrice)}</div>
                       </div>
                       <div>
-                        <div className="text-zinc-500">Score</div>
+                        <div className="text-zinc-500" title="Skor setup 0-100">Skor</div>
                         <div className="font-mono font-bold text-blue-400">{tfData.analysis.finalScore}</div>
                       </div>
                       <div>
-                        <div className="text-zinc-500">RR</div>
+                        <div className="text-zinc-500" title="Risk/Reward ratio">RR</div>
                         <div className="font-mono text-emerald-400">1:{tfData.analysis.risk.rr1.toFixed(2)}</div>
                       </div>
                       <div>
-                        <div className="text-zinc-500">Trend</div>
+                        <div className="text-zinc-500">Tren</div>
                         <div className="flex items-center gap-1">
                           {tfData.analysis.indicators.trend === "bullish" ? (
                             <TrendingUp className="h-4 w-4 text-emerald-400" />
                           ) : tfData.analysis.indicators.trend === "bearish" ? (
                             <TrendingDown className="h-4 w-4 text-red-400" />
                           ) : null}
-                          <span>{tfData.analysis.indicators.trend}</span>
+                          <span>{trendLabels[tfData.analysis.indicators.trend] ?? tfData.analysis.indicators.trend}</span>
                         </div>
                       </div>
                     </div>
@@ -236,7 +375,7 @@ export function MultiTimeframeTab() {
                 {!tfData.analysis && !tfData.loading && !tfData.error && (
                   <div className="py-4 text-center text-zinc-500">
                     <AlertCircle className="mx-auto h-8 w-8 opacity-30" />
-                    <div className="mt-2 text-sm">Run analysis to see {tf} data</div>
+                    <div className="mt-2 text-sm">Jalankan analisa untuk melihat data {timeframeLabels[tf]}</div>
                   </div>
                 )}
               </CardContent>
@@ -249,20 +388,37 @@ export function MultiTimeframeTab() {
       {summary && summary.results === 3 && (
         <Card className="border-blue-500/30 bg-blue-500/10">
           <CardContent className="p-4">
-            <h3 className="mb-3 font-semibold">Multi-Timeframe Analysis Summary</h3>
+            <h3 className="mb-3 font-semibold">Rangkuman Multi-Timeframe</h3>
             <div className="space-y-2 text-sm">
               {Object.entries(data).map(([tf, d]) => (
                 <div key={tf} className="flex items-center justify-between">
-                  <span className="font-mono">{tf}</span>
+                  <span className="font-mono">{timeframeLabels[tf as TimeFrame]} ({tf})</span>
                   <div className="flex items-center gap-4">
-                    <span>Score: {d.analysis?.finalScore}</span>
+                    <span>Skor: {d.analysis?.finalScore}</span>
                     <Badge tone={d.analysis!.decision.finalDecision === "BUY_NOW" ? "emerald" : d.analysis!.decision.finalDecision === "WATCHLIST" ? "amber" : "red"}>
-                      {d.analysis!.decision.finalDecision}
+                      {decisionLabels[d.analysis!.decision.finalDecision] ?? d.analysis!.decision.finalDecision}
                     </Badge>
                   </div>
                 </div>
               ))}
             </div>
+
+            {/* AI synthesis (opsional) */}
+            {synthesisEnabled && synthesis && (
+              <div className="mt-4 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-100">
+                <div className="mb-2 flex items-center gap-1 text-[10px] uppercase tracking-wider text-blue-300">
+                  <Sparkles className="h-3 w-3" />
+                  Sintesis AI
+                </div>
+                <pre className="whitespace-pre-wrap font-sans">{synthesis}</pre>
+              </div>
+            )}
+            {synthesisEnabled && synthesisLoading && !synthesis && (
+              <div className="mt-4 flex items-center gap-2 text-xs italic text-zinc-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                AI lagi menggabungkan hasil 3 timeframe...
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

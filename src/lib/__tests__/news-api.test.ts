@@ -38,7 +38,7 @@ describe("GET /api/news", () => {
     const data = await response.json();
 
     expect(response.status).toBe(400);
-    expect(data.error).toBe("No ticker");
+    expect(data.error).toBe("Parameter ticker kosong");
   });
 
   it("returns news with sentiment score", async () => {

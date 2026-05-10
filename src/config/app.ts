@@ -1,3 +1,5 @@
+import type { AISettings } from "@/lib/types";
+
 export const STORAGE_KEYS = {
   lastTicker: "idxai.last.ticker",
   lastCapital: "idxai.last.capital",
@@ -8,6 +10,7 @@ export const STORAGE_KEYS = {
   scanMode: "idxai.scan.mode",
   tradeHistory: "idxai.portfolio.history",
   lastScanAt: "idxai.scan.lastAt",
+  aiSettings: "idxai.ai.settings",
 } as const;
 
 export const SCAN_CONFIG = {
@@ -21,3 +24,25 @@ export const SCAN_CONFIG = {
  * would just return the same data.
  */
 export const AUTO_SCAN_THROTTLE_MS = 2 * 60 * 1000;
+
+/**
+ * Default AI settings. All features start OFF — user opts in per-feature
+ * from the Settings tab. Keeps the upgrade non-intrusive for existing users.
+ */
+export const DEFAULT_AI_SETTINGS: AISettings = {
+  provider: "ollama",
+  aiEnabled: false,
+  openaiKey: "",
+  anthropicKey: "",
+  openaiModel: "gpt-4o-mini",
+  anthropicModel: "claude-3-5-haiku-latest",
+  ollamaModel: "gemma4:e4b",
+  ollamaBaseUrl: "",
+  features: {
+    scannerCritique: false,
+    newsSummary: false,
+    multiTfSynthesis: false,
+    comparisonVerdict: false,
+    structuredOutput: false,
+  },
+};

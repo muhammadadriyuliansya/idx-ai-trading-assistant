@@ -48,8 +48,9 @@ import { TextPreviewModal } from "@/components/text-preview-modal";
 import { MultiTimeframeTab } from "@/components/timeframe-tab";
 import { ComparisonTab } from "@/components/comparison-tab";
 import { MarketBreadthTab } from "@/components/market-breadth-tab";
+import { SettingsTab } from "@/components/settings-tab";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { STORAGE_KEYS, SCAN_CONFIG, AUTO_SCAN_THROTTLE_MS } from "@/config/app";
+import { STORAGE_KEYS, SCAN_CONFIG, AUTO_SCAN_THROTTLE_MS, DEFAULT_AI_SETTINGS } from "@/config/app";
 import { actionTone, candidateTone, healthTone } from "@/features/trading/display";
 import {
   buildImprovementText,
@@ -70,6 +71,35 @@ import {
 } from "@/features/trading/dashboard-components";
 import { evaluateAlerts, getAlertLabel, mergeWatchlist } from "@/features/trading/watchlist";
 import type { AiOpinion, AlertCondition, LocalAlert, ScanMode, WatchlistItem } from "@/features/trading/types";
+import type { AISettings } from "@/lib/types";
+import { callAIIfEnabled } from "@/lib/ai-client";
+
+// Label Bahasa Indonesia untuk value bawaan (pipeline tetap pakai kode Inggris).
+const regimeLabels: Record<string, string> = {
+  AGGRESSIVE: "AGRESIF",
+  NORMAL: "NORMAL",
+  DEFENSIVE: "DEFENSIF",
+};
+
+const scanModeLabels: Record<ScanMode, string> = {
+  swing: "Swing",
+  day: "Day Trade",
+  conservative: "Konservatif",
+};
+
+const candidateStatusLabels: Record<string, string> = {
+  VALID: "VALID",
+  WATCHLIST: "PANTAUAN",
+  REJECT: "DILEWATI",
+  NO_TRADE: "TIDAK TRADE",
+};
+
+const actionLabels: Record<string, string> = {
+  APPROVED: "DISETUJUI",
+  WATCHLIST: "PANTAUAN",
+  REDUCE_SIZE: "KURANGI POSISI",
+  REJECTED: "DITOLAK",
+};
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<TabId>("scanner");
@@ -137,6 +167,13 @@ export default function HomePage() {
     STORAGE_KEYS.lastScanAt,
     0,
   );
+  const [aiSettings] = useLocalStorage<AISettings>(
+    STORAGE_KEYS.aiSettings,
+    DEFAULT_AI_SETTINGS,
+  );
+
+  const [aiRunLoading, setAiRunLoading] = useState(false);
+  const [aiRunError, setAiRunError] = useState<string | null>(null);
 
   const defaultTickerCount = useMemo(() => getDefaultIDXTickers().length, []);
   const currentAiOpinion = analysis
@@ -199,7 +236,7 @@ export default function HomePage() {
       setScanCompletedAt(now);
       setLastScanAt(now);
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : "Market scan failed");
+      setScanError(err instanceof Error ? err.message : "Scan pasar gagal dijalankan");
     } finally {
       setScanLoading(false);
     }
@@ -226,13 +263,13 @@ export default function HomePage() {
   const analyzeTicker = async (selectedTicker?: string) => {
     const nextTicker = (selectedTicker ?? ticker).trim().toUpperCase();
     if (!nextTicker) {
-      setAnalysisError("Masukkan ticker dulu.");
+      setAnalysisError("Masukkan kode saham dulu.");
       return;
     }
 
     const options = getPipelineOptions(capital, riskPerTrade);
     if (!options) {
-      setAnalysisError("Capital harus valid dan risk per trade harus 0.1% sampai 10%.");
+      setAnalysisError("Modal harus angka valid dan risk per trade antara 0.1% sampai 10%.");
       return;
     }
 
@@ -249,7 +286,7 @@ export default function HomePage() {
       setAnalysis(result);
       setAiDraft("");
     } catch (err) {
-      setAnalysisError(err instanceof Error ? err.message : "Analysis failed");
+      setAnalysisError(err instanceof Error ? err.message : "Analisa gagal dijalankan");
     } finally {
       setAnalysisLoading(false);
     }
@@ -297,6 +334,35 @@ export default function HomePage() {
     setAiDraft("");
   };
 
+  /**
+   * Langsung call AI provider (Ollama/OpenAI/Anthropic) pakai prompt yang udah
+   * di-generate. Output langsung masuk ke textarea `aiDraft` biar user bisa
+   * review sebelum simpan.
+   */
+  const runAIDirectly = async () => {
+    if (!analysis) return;
+    setAiRunLoading(true);
+    setAiRunError(null);
+    try {
+      const prompt = exportAIReadyPrompt(analysis);
+      const result = await callAIIfEnabled({
+        system:
+          "Kamu adalah asisten trading saham IDX. Berikan second opinion dalam Bahasa Indonesia yang ringkas, langsung ke inti, dan fokus pada risiko + eksekusi.",
+        user: prompt,
+        settings: aiSettings,
+      });
+      if (!result) {
+        setAiRunError("AI belum diaktifkan. Buka tab Pengaturan dan nyalakan master switch.");
+        return;
+      }
+      setAiDraft(result.text);
+    } catch (err) {
+      setAiRunError(err instanceof Error ? err.message : "AI gagal dihubungi");
+    } finally {
+      setAiRunLoading(false);
+    }
+  };
+
   const topCandidate = scanResults[0];
 
   return (
@@ -309,16 +375,16 @@ export default function HomePage() {
             </div>
             <div>
               <h1 className="text-lg font-semibold tracking-tight">
-                IDX AI Trading Assistant
+                Asisten Trading Saham IDX
               </h1>
               <p className="text-[11px] text-zinc-500">
-                Auto scanner, deterministic v2 pipeline, manual AI second opinion
+                Scanner otomatis, pipeline analisa deterministik, plus second opinion AI manual
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <Badge tone="blue">V2 Core</Badge>
+            <Badge tone="blue">Mesin V2</Badge>
           </div>
         </div>
       </header>
@@ -363,12 +429,18 @@ export default function HomePage() {
           <MarketBreadthTab />
         )}
 
+        {activeTab === "settings" && (
+          <SettingsTab />
+        )}
+
+        {activeTab !== "settings" && (
+        <>
         <Card className="border-blue-500/15 bg-blue-500/5">
           <CardContent className="p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="ticker">Ticker</Label>
+                  <Label htmlFor="ticker">Kode Saham</Label>
                   <Input
                     id="ticker"
                     value={ticker}
@@ -383,7 +455,7 @@ export default function HomePage() {
 
                 <FormattedNumberInput
                   id="capital"
-                  label="Trading Capital (Rp)"
+                  label="Modal Trading (Rp)"
                   value={capital}
                   onChange={setCapital}
                   onKeyDown={handleKeyDown}
@@ -391,7 +463,7 @@ export default function HomePage() {
                 />
 
                 <div className="space-y-1.5">
-                  <Label htmlFor="risk">Risk Per Trade (%)</Label>
+                  <Label htmlFor="risk">Risiko per Trade (%)</Label>
                   <Input
                     id="risk"
                     type="number"
@@ -414,12 +486,12 @@ export default function HomePage() {
                   {analysisLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Analyzing
+                      Menganalisa
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-4 w-4" />
-                      Analyze
+                      Analisa
                     </>
                   )}
                 </Button>
@@ -427,10 +499,10 @@ export default function HomePage() {
                   <Button
                     variant="outline"
                     size="lg"
-                    onClick={() => openTextModal("Institutional Brief", exportFullBrief(analysis))}
+                    onClick={() => openTextModal("Laporan Lengkap", exportFullBrief(analysis))}
                   >
                     <Download className="h-4 w-4" />
-                    Export Brief
+                    Export Laporan
                   </Button>
                 )}
               </div>
@@ -447,31 +519,31 @@ export default function HomePage() {
         <section className="grid grid-cols-1 gap-3 lg:grid-cols-4">
           <DashboardCard
             icon={<Activity className="h-4 w-4" />}
-            label="Market Regime"
-            value={marketDashboard.regime}
+            label="Kondisi Pasar"
+            value={regimeLabels[marketDashboard.regime] ?? marketDashboard.regime}
             tone={marketDashboard.regime === "AGGRESSIVE" ? "emerald" : marketDashboard.regime === "DEFENSIVE" ? "amber" : "blue"}
-            hint={`${marketDashboard.bullish} bullish / ${marketDashboard.bearish} bearish`}
+            hint={`${marketDashboard.bullish} naik / ${marketDashboard.bearish} turun`}
           />
           <DashboardCard
             icon={<ClipboardCheck className="h-4 w-4" />}
-            label="Candidates"
+            label="Kandidat"
             value={`${marketDashboard.valid + marketDashboard.watch}`}
             tone="blue"
-            hint={`${marketDashboard.valid} valid, ${marketDashboard.watch} watchlist, ${marketDashboard.rejected} reject`}
+            hint={`${marketDashboard.valid} valid, ${marketDashboard.watch} pantauan, ${marketDashboard.rejected} lewati`}
           />
           <DashboardCard
             icon={<BarChart3 className="h-4 w-4" />}
-            label="Volume Spike"
+            label="Lonjakan Volume"
             value={marketDashboard.bestVolume?.ticker ?? "-"}
             tone="violet"
-            hint={marketDashboard.bestVolume ? `${marketDashboard.bestVolume.volumeRatio.toFixed(2)}x average` : "Waiting for scan"}
+            hint={marketDashboard.bestVolume ? `${marketDashboard.bestVolume.volumeRatio.toFixed(2)}x dari rata-rata` : "Menunggu scan"}
           />
           <DashboardCard
             icon={<Shield className="h-4 w-4" />}
-            label="Portfolio Risk"
+            label="Risiko Portfolio"
             value={`${portfolioSnapshot.riskUsage.toFixed(0)}%`}
             tone={portfolioSnapshot.riskUsage >= 80 ? "red" : portfolioSnapshot.riskUsage >= 50 ? "amber" : "emerald"}
-            hint={`${portfolioSnapshot.activeSetups} active setups / ${portfolioSnapshot.capacity} slots left`}
+            hint={`${portfolioSnapshot.activeSetups} setup aktif / sisa ${portfolioSnapshot.capacity} slot`}
           />
         </section>
 
@@ -484,13 +556,13 @@ export default function HomePage() {
               <div>
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-blue-300">
                   <Search className="h-3.5 w-3.5" />
-                  Market Scanner
+                  Scanner Pasar
                 </div>
                 <h2 className="mt-1 text-xl font-semibold">
                   Saham yang paling menarik hari ini
                 </h2>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Auto-scan {defaultTickerCount} saham default dengan mode {scanMode}.
+                  Scan otomatis {defaultTickerCount} saham IDX default dengan mode {scanModeLabels[scanMode]}.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -502,7 +574,7 @@ export default function HomePage() {
                     onClick={() => setScanMode(mode)}
                     disabled={scanLoading}
                   >
-                    {mode === "day" ? "Day" : mode === "swing" ? "Swing" : "Conservative"}
+                    {scanModeLabels[mode]}
                   </Button>
                 ))}
                 <Button variant="outline" onClick={() => void runScan()} disabled={scanLoading}>
@@ -527,7 +599,7 @@ export default function HomePage() {
                 <CardContent className="flex min-h-[280px] items-center justify-center p-8">
                   <div className="text-center">
                     <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-300" />
-                    <div className="mt-3 text-sm font-semibold">Scanning IDX market</div>
+                    <div className="mt-3 text-sm font-semibold">Sedang scan pasar IDX</div>
                     <div className="mt-1 text-xs text-zinc-500">
                       Mengambil data Yahoo Finance dan meranking kandidat.
                     </div>
@@ -566,7 +638,7 @@ export default function HomePage() {
                             </div>
                           </div>
                           <Badge tone={candidateTone[candidate.status]}>
-                            {candidate.status}
+                            {candidateStatusLabels[candidate.status] ?? candidate.status}
                           </Badge>
                         </div>
 
@@ -582,8 +654,8 @@ export default function HomePage() {
                         </div>
 
                         <div className="grid grid-cols-4 gap-2 text-xs">
-                          <MetricChip label="Score" value={`${candidate.setupScore}/100`} />
-                          <MetricChip label="Mode" value={candidate.mode} />
+                          <MetricChip label="Skor" value={`${candidate.setupScore}/100`} />
+                          <MetricChip label="Mode" value={scanModeLabels[candidate.mode] ?? candidate.mode} />
                           <MetricChip label="Volume" value={`${candidate.volumeRatio.toFixed(2)}x`} />
                           <MetricChip label="RR" value={`1:${candidate.rr.toFixed(2)}`} />
                         </div>
@@ -597,11 +669,11 @@ export default function HomePage() {
                         </div>
 
                         <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-2 text-[10px] text-zinc-400">
-                          <div><span className="text-zinc-500">Trigger:</span> {candidate.nextTrigger}</div>
-                          <div><span className="text-zinc-500">Invalid:</span> {candidate.invalidation}</div>
+                          <div><span className="text-zinc-500">Pemicu:</span> {candidate.nextTrigger}</div>
+                          <div><span className="text-zinc-500">Batal jika:</span> {candidate.invalidation}</div>
                           <div>
-                            <span className="text-zinc-500">Mini test:</span>{" "}
-                            {candidate.miniBacktest.outcome} / {candidate.miniBacktest.horizonDays}d / {candidate.miniBacktest.estimatedReturnPct}% est.
+                            <span className="text-zinc-500">Simulasi cepat:</span>{" "}
+                            {candidate.miniBacktest.outcome} / {candidate.miniBacktest.horizonDays} hari / estimasi {candidate.miniBacktest.estimatedReturnPct}%
                           </div>
                         </div>
 
@@ -617,12 +689,12 @@ export default function HomePage() {
                             ) : (
                               <TrendingUp className="h-4 w-4" />
                             )}
-                            Analyze
+                            Analisa
                           </Button>
                           <Button
                             variant="outline"
                             size="icon"
-                            title="Add local volume alert"
+                            title="Pasang alarm lonjakan volume"
                             onClick={() => addAlert(candidate, "VOLUME_ABOVE_1_5")}
                           >
                             <Bell className="h-4 w-4" />
@@ -639,7 +711,7 @@ export default function HomePage() {
                   <AlertTriangle className="mx-auto h-8 w-8 text-amber-300" />
                   <div className="mt-3 text-sm font-semibold">Belum ada kandidat lolos filter</div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    Coba refresh setelah data market berubah.
+                    Coba refresh setelah data pasar berubah.
                   </div>
                 </CardContent>
               </Card>
@@ -652,7 +724,7 @@ export default function HomePage() {
               <CardContent className="p-5">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
                   <Target className="h-3.5 w-3.5" />
-                  Best Candidate
+                  Kandidat Terbaik
                 </div>
                 {topCandidate ? (
                   <div className="mt-4 space-y-4">
@@ -666,14 +738,14 @@ export default function HomePage() {
                         </div>
                       </div>
                       <Badge tone={candidateTone[topCandidate.status]}>
-                        {topCandidate.status}
+                        {candidateStatusLabels[topCandidate.status] ?? topCandidate.status}
                       </Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <MetricChip label="Setup Score" value={`${topCandidate.setupScore}/100`} />
+                      <MetricChip label="Skor Setup" value={`${topCandidate.setupScore}/100`} />
                       <MetricChip label="Risk Reward" value={`1:${topCandidate.rr.toFixed(2)}`} />
                       <MetricChip label="Volume" value={`${topCandidate.volumeRatio.toFixed(2)}x`} />
-                      <MetricChip label="Trend" value={topCandidate.trend} />
+                      <MetricChip label="Tren" value={topCandidate.trend} />
                     </div>
                     <Button
                       className="w-full"
@@ -682,7 +754,7 @@ export default function HomePage() {
                       disabled={analysisLoading}
                     >
                       <Sparkles className="h-4 w-4" />
-                      Analyze Top Pick
+                      Analisa Kandidat Terbaik
                     </Button>
                   </div>
                 ) : (
@@ -697,15 +769,15 @@ export default function HomePage() {
               <CardContent className="p-5">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                   <BarChart3 className="h-3.5 w-3.5" />
-                  Scan Status
+                  Status Scan
                 </div>
                 <div className="mt-4 space-y-3 text-xs">
-                  <StatusRow label="Universe" value={`${defaultTickerCount} tickers`} />
-                  <StatusRow label="Candidates" value={`${scanResults.length}`} />
-                  <StatusRow label="Mode" value={scanMode} />
-                  <StatusRow label="Rules" value={scanMode === "day" ? "VWAP/volume/RR 1.2" : scanMode === "swing" ? "EMA20/RR 1.5" : "strict RR 2.0"} />
+                  <StatusRow label="Universe" value={`${defaultTickerCount} saham`} />
+                  <StatusRow label="Kandidat" value={`${scanResults.length}`} />
+                  <StatusRow label="Mode" value={scanModeLabels[scanMode]} />
+                  <StatusRow label="Aturan" value={scanMode === "day" ? "VWAP/volume/RR 1.2" : scanMode === "swing" ? "EMA20/RR 1.5" : "RR ketat 2.0"} />
                   <StatusRow
-                    label="Last Scan"
+                    label="Scan Terakhir"
                     value={
                       scanCompletedAt
                         ? new Date(scanCompletedAt).toLocaleTimeString("id-ID", {
@@ -723,7 +795,7 @@ export default function HomePage() {
               <CardContent className="p-5">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                   <Eye className="h-3.5 w-3.5" />
-                  Auto Watchlist
+                  Pantauan Otomatis
                 </div>
                 <div className="mt-4 space-y-2">
                   {watchlist.length > 0 ? (
@@ -731,14 +803,14 @@ export default function HomePage() {
                       <div key={item.ticker} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 text-xs">
                         <div className="flex items-center justify-between">
                           <span className="font-mono font-semibold">{item.ticker}</span>
-                          <Badge tone={candidateTone[item.status]}>{item.status}</Badge>
+                          <Badge tone={candidateTone[item.status]}>{candidateStatusLabels[item.status] ?? item.status}</Badge>
                         </div>
                         <div className="mt-2 text-zinc-500">{item.trigger}</div>
                       </div>
                     ))
                   ) : (
                     <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-xs text-zinc-500">
-                      WATCHLIST scanner akan disimpan otomatis di sini.
+                      Saham PANTAUAN dari scanner akan otomatis muncul di sini.
                     </div>
                   )}
                 </div>
@@ -749,7 +821,7 @@ export default function HomePage() {
               <CardContent className="p-5">
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                   <Bell className="h-3.5 w-3.5" />
-                  Local Alerts
+                  Alarm Lokal
                 </div>
                 <div className="mt-4 space-y-2">
                   {alerts.length > 0 ? (
@@ -758,7 +830,7 @@ export default function HomePage() {
                         <div className="flex items-center justify-between">
                           <span className="font-mono font-semibold">{item.ticker}</span>
                           <Badge tone={item.triggeredAt ? "emerald" : "blue"}>
-                            {item.triggeredAt ? "TRIGGERED" : "ARMED"}
+                            {item.triggeredAt ? "BERBUNYI" : "AKTIF"}
                           </Badge>
                         </div>
                         <div className="mt-2 text-zinc-500">{item.targetLabel}</div>
@@ -766,7 +838,7 @@ export default function HomePage() {
                     ))
                   ) : (
                     <div className="rounded-xl border border-dashed border-zinc-800 p-4 text-xs text-zinc-500">
-                      Klik ikon bell di kandidat untuk membuat alert lokal.
+                      Klik ikon bel di kartu kandidat untuk memasang alarm.
                     </div>
                   )}
                 </div>
@@ -778,19 +850,41 @@ export default function HomePage() {
                 <CardContent className="p-5">
                   <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                     <Brain className="h-3.5 w-3.5" />
-                    Manual AI
+                    AI Manual
                   </div>
                   <p className="mt-3 text-xs text-zinc-500">
-                    AI tidak ikut menjalankan core pipeline. Pakai prompt ini kalau mau second opinion manual.
+                    {aiSettings.aiEnabled
+                      ? `Provider aktif: ${aiSettings.provider.toUpperCase()}. Keputusan inti tetap deterministic, AI cuma kasih second opinion.`
+                      : "AI tidak ikut ke pipeline inti. Pakai prompt ini kalau mau minta second opinion dari ChatGPT/Claude secara manual."}
                   </p>
-                  <Button
-                    className="mt-4 w-full"
-                    variant="outline"
-                    onClick={() => openTextModal("AI-Ready Prompt", exportAIReadyPrompt(analysis))}
-                  >
-                    <Copy className="h-4 w-4" />
-                    Open AI Prompt
-                  </Button>
+                  {aiSettings.aiEnabled ? (
+                    <Button
+                      className="mt-4 w-full"
+                      onClick={() => void runAIDirectly()}
+                      disabled={aiRunLoading}
+                    >
+                      {aiRunLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          AI sedang berpikir...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" />
+                          Jalankan AI Sekarang
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <Button
+                      className="mt-4 w-full"
+                      variant="outline"
+                      onClick={() => openTextModal("Prompt AI Siap Pakai", exportAIReadyPrompt(analysis))}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Buka Prompt AI
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -804,10 +898,10 @@ export default function HomePage() {
               <div className="text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-blue-300" />
                 <div className="mt-3 text-sm font-semibold">
-                  Running v2 institutional pipeline
+                  Sedang jalanin pipeline institusi v2
                 </div>
                 <div className="mt-1 text-xs text-zinc-500">
-                  Market data, analysts, thesis, portfolio decision, dan export layer.
+                  Data pasar, analis, thesis, keputusan portfolio, sampai layer export.
                 </div>
               </div>
             </CardContent>
@@ -815,7 +909,7 @@ export default function HomePage() {
         )}
 
         {analysis && !analysisLoading && (
-          <ErrorBoundary sectionName="Analysis Results">
+          <ErrorBoundary sectionName="Hasil Analisa">
           <motion.section
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
@@ -825,14 +919,14 @@ export default function HomePage() {
               <div>
                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-blue-300">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  Full Analysis
+                  Analisa Lengkap
                 </div>
                 <h2 className="mt-1 text-xl font-semibold">
-                  {analysis.ticker} institutional read
+                  Laporan institusi {analysis.ticker}
                 </h2>
               </div>
               <Badge tone={actionTone[analysis.portfolioDecision.action] ?? "neutral"}>
-                {analysis.portfolioDecision.action}
+                {actionLabels[analysis.portfolioDecision.action] ?? analysis.portfolioDecision.action}
               </Badge>
             </div>
 
@@ -842,20 +936,20 @@ export default function HomePage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                       <Shield className="h-3.5 w-3.5" />
-                      Data Health
+                      Kualitas Data
                     </div>
                     <Badge tone={healthTone[analysis.dataHealth.status]}>
                       {analysis.dataHealth.score}/100
                     </Badge>
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <MetricChip label="Last Bar" value={analysis.dataHealth.lastUpdate} />
-                    <MetricChip label="Bars" value={`${analysis.dataHealth.barsCount}`} />
-                    <MetricChip label="Source" value={analysis.dataHealth.source} />
-                    <MetricChip label="Fundamental" value={analysis.dataHealth.hasFundamental ? "Yes" : "No"} />
+                    <MetricChip label="Bar Terakhir" value={analysis.dataHealth.lastUpdate} />
+                    <MetricChip label="Jumlah Bar" value={`${analysis.dataHealth.barsCount}`} />
+                    <MetricChip label="Sumber" value={analysis.dataHealth.source === "cache" ? "Cache" : "Langsung"} />
+                    <MetricChip label="Fundamental" value={analysis.dataHealth.hasFundamental ? "Ada" : "Tidak"} />
                   </div>
                   <div className="mt-3 space-y-1 text-[10px] text-zinc-500">
-                    {(analysis.dataHealth.issues.length > 0 ? analysis.dataHealth.issues : ["No critical data issue detected."]).slice(0, 4).map((issue) => (
+                    {(analysis.dataHealth.issues.length > 0 ? analysis.dataHealth.issues : ["Tidak ada masalah data yang kritikal."]).slice(0, 4).map((issue) => (
                       <div key={issue}>- {issue}</div>
                     ))}
                   </div>
@@ -866,12 +960,12 @@ export default function HomePage() {
                 <CardContent className="p-5">
                   <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                     <Target className="h-3.5 w-3.5" />
-                    Why This Decision
+                    Alasan Keputusan
                   </div>
                   <div className="mt-4 space-y-2 text-xs text-zinc-400">
-                    <ExplainRow label="Why not BUY" value={analysis.decision.finalDecision === "BUY_NOW" ? "Pipeline allows BUY_NOW, but still requires disciplined stop execution." : analysis.decision.keyRisk} />
-                    <ExplainRow label="What must improve" value={buildImprovementText(analysis)} />
-                    <ExplainRow label="Invalidation" value={`Break below stop ${analysis.risk.stopLoss} or support ${analysis.marketData.support.toFixed(0)}.`} />
+                    <ExplainRow label="Kenapa belum BUY" value={analysis.decision.finalDecision === "BUY_NOW" ? "Pipeline sudah kasih sinyal BUY_NOW, tapi eksekusi stop harus tetap disiplin." : analysis.decision.keyRisk} />
+                    <ExplainRow label="Yang harus membaik" value={buildImprovementText(analysis)} />
+                    <ExplainRow label="Setup batal kalau" value={`Turun di bawah stop ${analysis.risk.stopLoss} atau support ${analysis.marketData.support.toFixed(0)}.`} />
                   </div>
                 </CardContent>
               </Card>
@@ -880,20 +974,20 @@ export default function HomePage() {
                 <CardContent className="p-5">
                   <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                     <Shield className="h-3.5 w-3.5" />
-                    Portfolio Mode
+                    Sizing Portfolio
                   </div>
                   <div className="mt-4 grid grid-cols-2 gap-2">
-                    <MetricChip label="Ticker" value={analysis.risk.ticker.replace(".JK", "")} />
-                    <MetricChip label="Risk Budget" value={formatCurrency(analysis.risk.riskBudget)} />
-                    <MetricChip label="Lots" value={`${analysis.risk.positionSize.lots}`} />
+                    <MetricChip label="Saham" value={analysis.risk.ticker.replace(".JK", "")} />
+                    <MetricChip label="Budget Risk" value={formatCurrency(analysis.risk.riskBudget)} />
+                    <MetricChip label="Lot" value={`${analysis.risk.positionSize.lots}`} />
                     <MetricChip label="Max Loss" value={formatCurrency(analysis.risk.positionSize.maxLoss)} />
-                    <MetricChip label="Position" value={formatCurrency(analysis.risk.positionSize.positionValue)} />
-                    <MetricChip label="Risk Usage" value={`${portfolioSnapshot.riskUsage.toFixed(0)}%`} />
+                    <MetricChip label="Nilai Posisi" value={formatCurrency(analysis.risk.positionSize.positionValue)} />
+                    <MetricChip label="Pemakaian Risk" value={`${portfolioSnapshot.riskUsage.toFixed(0)}%`} />
                   </div>
                   <div className="mt-3 text-[10px] text-zinc-500">
                     {portfolioSnapshot.riskUsage > 80
-                      ? "Portfolio risk is crowded. Reduce number of active setups before adding more."
-                      : "Portfolio risk still has room, but each new position should respect the max loss budget."}
+                      ? "Risiko portfolio sudah padat. Kurangi jumlah setup aktif sebelum tambah posisi baru."
+                      : "Risiko portfolio masih ada ruang. Tetap patuhi budget max loss tiap posisi baru."}
                   </div>
                 </CardContent>
               </Card>
@@ -905,14 +999,14 @@ export default function HomePage() {
                   <div className="max-w-xl">
                     <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
                       <Brain className="h-3.5 w-3.5" />
-                      Manual AI Second Opinion
+                      Second Opinion AI Manual
                     </div>
                     <p className="mt-2 text-xs text-zinc-500">
-                      Generate prompt, paste jawaban AI balik ke sini, lalu app menyimpan perbandingan manual. Core decision tetap deterministic.
+                      Generate prompt, paste jawaban AI balik ke sini, app bakal simpan sebagai perbandingan manual. Keputusan inti tetap deterministic.
                     </p>
                     {currentAiOpinion && (
                       <div className="mt-3 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-200">
-                        Saved opinion: {currentAiOpinion.text.slice(0, 220)}{currentAiOpinion.text.length > 220 ? "..." : ""}
+                        Opini tersimpan: {currentAiOpinion.text.slice(0, 220)}{currentAiOpinion.text.length > 220 ? "..." : ""}
                       </div>
                     )}
                   </div>
@@ -920,17 +1014,37 @@ export default function HomePage() {
                     <textarea
                       value={aiDraft}
                       onChange={(event) => setAiDraft(event.target.value)}
-                      placeholder="Paste AI second opinion here..."
+                      placeholder="Paste second opinion AI di sini..."
                       className="min-h-[110px] resize-none rounded-lg border border-zinc-800 bg-black/30 p-3 text-xs text-zinc-200 outline-none"
                     />
+                    {aiRunError && (
+                      <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
+                        {aiRunError}
+                      </div>
+                    )}
                     <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={() => openTextModal("AI-Ready Prompt", exportAIReadyPrompt(analysis))}>
+                      {aiSettings.aiEnabled && (
+                        <Button onClick={() => void runAIDirectly()} disabled={aiRunLoading}>
+                          {aiRunLoading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              AI sedang berpikir...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4" />
+                              Jalankan AI Sekarang
+                            </>
+                          )}
+                        </Button>
+                      )}
+                      <Button variant="outline" onClick={() => openTextModal("Prompt AI Siap Pakai", exportAIReadyPrompt(analysis))}>
                         <Copy className="h-4 w-4" />
-                        Generate Prompt
+                        Salin Prompt
                       </Button>
                       <Button onClick={saveAiOpinion} disabled={!aiDraft.trim()}>
                         <ClipboardCheck className="h-4 w-4" />
-                        Save Opinion
+                        Simpan Opini
                       </Button>
                     </div>
                   </div>
@@ -940,10 +1054,12 @@ export default function HomePage() {
 
             <PipelineViewer
               pipeline={analysis}
-              onAnalyzeWithAI={(prompt) => openTextModal("AI-Ready Prompt", prompt)}
+              onAnalyzeWithAI={(prompt) => openTextModal("Prompt AI Siap Pakai", prompt)}
             />
           </motion.section>
           </ErrorBoundary>
+        )}
+        </>
         )}
       </main>
 

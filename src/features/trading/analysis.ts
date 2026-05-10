@@ -30,14 +30,14 @@ export function normalizeAnalysisMode(mode: ScanMode): TradingMode {
 
 export function buildImprovementText(analysis: AnalysisPipeline): string {
   const improvements: string[] = [];
-  if (analysis.indicators.trend !== "bullish") improvements.push("trend must turn bullish");
-  if (analysis.indicators.volumeRatio < 1.5) improvements.push("volume must rise above 1.5x");
-  if (analysis.risk.rr1 < 2) improvements.push("RR should improve above 2.0");
+  if (analysis.indicators.trend !== "bullish") improvements.push("tren harus berubah naik");
+  if (analysis.indicators.volumeRatio < 1.5) improvements.push("volume harus naik di atas 1.5x rata-rata");
+  if (analysis.risk.rr1 < 2) improvements.push("Risk/Reward harus di atas 2.0");
   if (analysis.context.marketRegime === "DEFENSIVE") {
-    improvements.push("IHSG regime should stop being defensive");
+    improvements.push("kondisi IHSG harus keluar dari mode defensif");
   }
 
   return improvements.length > 0
     ? improvements.join(", ")
-    : "Setup already meets the main improvement gates; execution discipline is the key constraint.";
+    : "Setup sudah lewat filter utama. Tinggal disiplin eksekusi yang jadi penentu.";
 }

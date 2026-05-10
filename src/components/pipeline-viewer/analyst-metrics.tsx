@@ -12,6 +12,12 @@ export function ConfidenceHeatmap({
       {reports.map((report) => {
         const pct = Math.min(100, Math.max(0, report.score));
         const tone = pct >= 70 ? "emerald" : pct >= 50 ? "amber" : "red";
+        const biasLabel =
+          report.bias === "bullish"
+            ? "Cenderung Naik"
+            : report.bias === "bearish"
+              ? "Cenderung Turun"
+              : "Netral";
         return (
           <div key={report.agent} className="space-y-1">
             <div className="flex items-center justify-between text-xs">
@@ -41,8 +47,8 @@ export function ConfidenceHeatmap({
               />
             </div>
             <div className="flex items-center justify-between text-[10px] text-zinc-500">
-              <span className="capitalize">{report.bias}</span>
-              <span>Confidence: {report.confidence}%</span>
+              <span className="capitalize">{biasLabel}</span>
+              <span>Keyakinan: {report.confidence}%</span>
             </div>
           </div>
         );
@@ -69,7 +75,7 @@ export function AnalystAgreementMeter({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-zinc-400">Analyst Agreement</span>
+        <span className="text-zinc-400">Kesepakatan Analis</span>
         <span
           className={`font-mono font-semibold ${
             tone === "emerald"
@@ -84,9 +90,9 @@ export function AnalystAgreementMeter({
       </div>
       <Progress value={agreementPct} tone={tone} className="h-2" />
       <div className="flex gap-3 text-[10px] text-zinc-500">
-        <span className="text-emerald-400">Up {bullishCount} Bullish</span>
-        <span className="text-red-400">Down {bearishCount} Bearish</span>
-        <span>{neutralCount} Neutral</span>
+        <span className="text-emerald-400">{bullishCount} Menyarankan Naik</span>
+        <span className="text-red-400">{bearishCount} Menyarankan Turun</span>
+        <span>{neutralCount} Netral</span>
       </div>
     </div>
   );
@@ -94,7 +100,12 @@ export function AnalystAgreementMeter({
 
 export function ConflictIndicator({ conflictScore }: { conflictScore: number }) {
   const tone = conflictScore > 60 ? "red" : conflictScore > 30 ? "amber" : "emerald";
-  const label = conflictScore > 60 ? "High Conflict" : conflictScore > 30 ? "Moderate" : "Low Conflict";
+  const label =
+    conflictScore > 60
+      ? "Konflik Tinggi"
+      : conflictScore > 30
+        ? "Konflik Sedang"
+        : "Konflik Rendah";
 
   return (
     <div className="flex items-center gap-2">

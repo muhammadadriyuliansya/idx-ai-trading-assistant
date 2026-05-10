@@ -6,7 +6,8 @@ import {
   BarChart3, 
   ScanLine,
   GitCompare,
-  Layers
+  Layers,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,8 +23,9 @@ export const TABS: TabItem[] = [
   { id: "scanner", label: "Scanner", icon: <Search className="h-4 w-4" /> },
   { id: "analysis", label: "Analisis", icon: <BarChart3 className="h-4 w-4" /> },
   { id: "comparison", label: "Bandingkan", icon: <GitCompare className="h-4 w-4" /> },
-  { id: "timeframe", label: "Multi-TF", icon: <ScanLine className="h-4 w-4" /> },
-  { id: "breadth", label: "Market", icon: <Layers className="h-4 w-4" /> },
+  { id: "timeframe", label: "Multi Timeframe", icon: <ScanLine className="h-4 w-4" /> },
+  { id: "breadth", label: "Kondisi Market", icon: <Layers className="h-4 w-4" /> },
+  { id: "settings", label: "Pengaturan", icon: <SettingsIcon className="h-4 w-4" /> },
 ];
 
 interface TabNavigationProps {

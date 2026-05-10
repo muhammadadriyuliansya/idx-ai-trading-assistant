@@ -55,11 +55,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-red-300">
                   {this.props.sectionName
-                    ? `${this.props.sectionName} Error`
-                    : "Something went wrong"}
+                    ? `Error di ${this.props.sectionName}`
+                    : "Terjadi kesalahan"}
                 </div>
                 <div className="mt-1 text-xs text-zinc-500">
-                  {this.state.error?.message ?? "An unexpected error occurred"}
+                  {this.state.error?.message ?? "Ada error yang tidak terduga"}
                 </div>
                 <Button
                   variant="outline"
@@ -68,7 +68,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                   className="mt-3"
                 >
                   <RefreshCw className="h-3 w-3 mr-1" />
-                  Try Again
+                  Coba Lagi
                 </Button>
               </div>
             </div>

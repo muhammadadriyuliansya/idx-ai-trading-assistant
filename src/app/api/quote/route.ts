@@ -326,7 +326,7 @@ export async function GET(request: Request) {
   const symbol = normaliseTicker(tickerParam);
   if (!symbol) {
     return NextResponse.json(
-      { error: "Missing ticker query parameter (e.g. ?ticker=BBRI)" },
+      { error: "Parameter ticker kosong. Contoh: ?ticker=BBRI" },
       { status: 400 },
     );
   }
@@ -334,7 +334,7 @@ export async function GET(request: Request) {
   const tickerClean = symbol.replace(".JK", "");
   if (!isValidTicker(tickerClean)) {
     return NextResponse.json(
-      { error: "Invalid ticker format. Use 4 letters (e.g. BBRI, TLKM)" },
+      { error: "Format ticker salah. Pakai 4 huruf, contoh: BBRI, TLKM" },
       { status: 400 },
     );
   }
@@ -343,7 +343,7 @@ export async function GET(request: Request) {
     request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
   if (!checkRateLimit(clientIp)) {
     return NextResponse.json(
-      { error: "Rate limit exceeded. Try again in 1 minute." },
+      { error: "Terlalu banyak permintaan. Coba lagi 1 menit." },
       { status: 429 },
     );
   }
@@ -366,7 +366,7 @@ export async function GET(request: Request) {
     if (bars.length < 60) {
       return NextResponse.json(
         {
-          error: `Not enough data for ${symbol} (got ${bars.length} bars). Verify the ticker is listed on IDX.`,
+          error: `Data tidak cukup untuk ${symbol} (baru ${bars.length} bar). Pastikan kode saham terdaftar di IDX.`,
         },
         { status: 404 },
       );
@@ -410,7 +410,7 @@ export async function GET(request: Request) {
       return NextResponse.json(staleResult, {
         headers: {
           "Cache-Control": "no-store",
-          "X-Data-Warning": "Yahoo Finance failed; served stale cache",
+          "X-Data-Warning": "Yahoo Finance gagal; pakai cache lama",
         },
       });
     }
@@ -420,7 +420,7 @@ export async function GET(request: Request) {
       {
         error: isNotFound
           ? `Ticker ${symbol} tidak ditemukan di Yahoo Finance.`
-          : `Gagal fetch ${symbol}: ${message}`,
+          : `Gagal ambil data ${symbol}: ${message}`,
       },
       { status: isNotFound ? 404 : 502 },
     );

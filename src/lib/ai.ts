@@ -1,39 +1,60 @@
 "use client";
 
-import type { AISettings, ModuleKey } from "./types";
+import type { AISettings, ModuleKey, Provider } from "./types";
+import { DEFAULT_AI_SETTINGS } from "@/config/app";
 
 export interface GenerateRequest {
   module: ModuleKey;
   system: string;
   user: string;
   settings: AISettings;
+  /** Request JSON-formatted output where supported. */
+  format?: "json";
 }
 
 export interface GenerateResult {
   text: string;
-  provider: "openai" | "anthropic";
+  provider: Provider;
   model: string;
 }
 
+/**
+ * Client-side entry point for AI generation. Picks the active provider from
+ * settings, sends the payload to /api/ai, and returns the raw text.
+ *
+ * Does NOT apply caching — callers (e.g. ai-client.ts) can layer that on top.
+ */
 export async function generateAnalysis(
   req: GenerateRequest,
 ): Promise<GenerateResult> {
   const provider = req.settings.provider;
-  const apiKey =
-    provider === "openai"
-      ? req.settings.openaiKey.trim()
-      : req.settings.anthropicKey.trim();
 
-  if (!apiKey) {
-    throw new Error(
-      provider === "openai"
-        ? "OpenAI API key belum di-set. Buka Settings dan masukin key lu."
-        : "Anthropic API key belum di-set. Buka Settings dan masukin key lu.",
-    );
+  let apiKey = "";
+  let model = "";
+  let baseUrl: string | undefined;
+
+  if (provider === "openai") {
+    apiKey = req.settings.openaiKey.trim();
+    model = req.settings.openaiModel;
+    if (!apiKey) {
+      throw new Error("OpenAI API key belum di-set. Buka Settings dan isi key lu.");
+    }
+  } else if (provider === "anthropic") {
+    apiKey = req.settings.anthropicKey.trim();
+    model = req.settings.anthropicModel;
+    if (!apiKey) {
+      throw new Error("Anthropic API key belum di-set. Buka Settings dan isi key lu.");
+    }
+  } else if (provider === "ollama") {
+    model = req.settings.ollamaModel;
+    baseUrl = req.settings.ollamaBaseUrl.trim() || undefined;
+    if (!model) {
+      throw new Error("Model Ollama belum di-set. Buka Settings dan isi nama model.");
+    }
+  } else {
+    const exhaustive: never = provider;
+    throw new Error(`Provider tidak dikenal: ${String(exhaustive)}`);
   }
-
-  const model =
-    provider === "openai" ? req.settings.openaiModel : req.settings.anthropicModel;
 
   const res = await fetch("/api/ai", {
     method: "POST",
@@ -41,9 +62,11 @@ export async function generateAnalysis(
     body: JSON.stringify({
       provider,
       model,
-      apiKey,
+      apiKey: apiKey || undefined,
+      baseUrl,
       system: req.system,
       user: req.user,
+      format: req.format,
     }),
   });
 
@@ -62,10 +85,8 @@ export async function generateAnalysis(
   return { text: data.text, provider, model: data.model };
 }
 
-export const DEFAULT_SETTINGS: AISettings = {
-  provider: "openai",
-  openaiKey: "",
-  anthropicKey: "",
-  openaiModel: "gpt-4o-mini",
-  anthropicModel: "claude-3-5-sonnet-latest",
-};
+/**
+ * Re-export DEFAULT_AI_SETTINGS under its legacy name for modules still
+ * importing the older symbol. New code should use DEFAULT_AI_SETTINGS.
+ */
+export const DEFAULT_SETTINGS: AISettings = DEFAULT_AI_SETTINGS;

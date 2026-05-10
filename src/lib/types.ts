@@ -1,11 +1,35 @@
-export type Provider = "openai" | "anthropic";
+export type Provider = "openai" | "anthropic" | "ollama";
+
+/**
+ * Per-feature toggles for optional AI augmentation layers. All default OFF
+ * so upgrades never change behavior until the user opts in.
+ */
+export interface AIFeatureFlags {
+  /** AI-generated one-liner critique per scanner candidate. */
+  scannerCritique: boolean;
+  /** AI summary of recent news headlines per ticker. */
+  newsSummary: boolean;
+  /** AI synthesis across 1D/1W/1M timeframes. */
+  multiTfSynthesis: boolean;
+  /** AI verdict when comparing 2+ stocks. */
+  comparisonVerdict: boolean;
+  /** Request JSON-mode structured output where supported. */
+  structuredOutput: boolean;
+}
 
 export interface AISettings {
   provider: Provider;
+  /** Master switch — even if provider is configured, AI stays off when false. */
+  aiEnabled: boolean;
   openaiKey: string;
   anthropicKey: string;
   openaiModel: string;
   anthropicModel: string;
+  /** Ollama model tag, e.g. "gemma4:e4b" or "llama3.2:3b". */
+  ollamaModel: string;
+  /** Override default http://localhost:11434. Empty string = use default. */
+  ollamaBaseUrl: string;
+  features: AIFeatureFlags;
 }
 
 export interface ScannerInput {

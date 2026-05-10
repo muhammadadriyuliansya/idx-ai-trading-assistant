@@ -13,7 +13,7 @@ export function ThemeToggle() {
       size="icon"
       onClick={toggleTheme}
       className="h-9 w-9"
-      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      title={theme === "dark" ? "Ganti ke mode terang" : "Ganti ke mode gelap"}
     >
       {theme === "dark" ? (
         <Sun className="h-4 w-4" />

@@ -25,7 +25,7 @@ interface NewsResponse {
 
 export async function GET(req: NextRequest) {
   const ticker = req.nextUrl.searchParams.get('ticker');
-  if (!ticker) return NextResponse.json({ error: 'No ticker' }, { status: 400 });
+  if (!ticker) return NextResponse.json({ error: 'Parameter ticker kosong' }, { status: 400 });
 
   try {
     const payload = await cached<NewsResponse>(

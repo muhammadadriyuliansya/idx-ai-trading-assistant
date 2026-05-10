@@ -25,12 +25,27 @@ interface SectorData {
   declineCount: number;
 }
 
+// Label Bahasa Indonesia
+const decisionLabels: Record<string, string> = {
+  BUY_NOW: "Beli Sekarang",
+  WAIT: "Tunggu",
+  WATCHLIST: "Pantauan",
+  REJECT: "Lewati",
+  NO_TRADE: "Tidak Trade",
+};
+
+const trendLabels: Record<string, string> = {
+  bullish: "Naik",
+  bearish: "Turun",
+  sideways: "Mendatar",
+};
+
 const IDX_SECTORS = [
-  { name: "Finance", tickers: ["BBRI", "BMRI", "BDMN", "BNGA", "BTN"] },
-  { name: "Infrastructure", tickers: ["TLKM", "EXCL", "ISAT", "FREN"] },
-  { name: "Consumer", tickers: ["UNVR", "ICBP", "INDF", "KLBF", "WIIM"] },
-  { name: "Mining", tickers: ["ANTM", "INCO", "PTBA", "TINS"] },
-  { name: "Properties", tickers: ["BSDE", "PWON", "CTRA", "LAND"] },
+  { name: "Keuangan", tickers: ["BBRI", "BMRI", "BDMN", "BNGA", "BTN"] },
+  { name: "Infrastruktur", tickers: ["TLKM", "EXCL", "ISAT", "FREN"] },
+  { name: "Konsumer", tickers: ["UNVR", "ICBP", "INDF", "KLBF", "WIIM"] },
+  { name: "Tambang", tickers: ["ANTM", "INCO", "PTBA", "TINS"] },
+  { name: "Properti", tickers: ["BSDE", "PWON", "CTRA", "LAND"] },
 ];
 
 export function MarketBreadthTab() {
@@ -96,11 +111,11 @@ export function MarketBreadthTab() {
   const advanceDeclineRatio = totalDecline > 0 ? totalAdvance / totalDecline : totalAdvance;
 
   const getMarketBreadth = (): string => {
-    if (totalAdvance > totalDecline * 1.5) return "Strong Bullish";
+    if (totalAdvance > totalDecline * 1.5) return "Sangat Bullish";
     if (totalAdvance > totalDecline) return "Bullish";
-    if (totalDecline > totalAdvance * 1.5) return "Strong Bearish";
+    if (totalDecline > totalAdvance * 1.5) return "Sangat Bearish";
     if (totalDecline > totalAdvance) return "Bearish";
-    return "Neutral";
+    return "Netral";
   };
 
   const getBreadthTone = (): "emerald" | "blue" | "amber" | "red" => {
@@ -118,21 +133,21 @@ export function MarketBreadthTab() {
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-semibold">Market Breadth</h2>
+              <h2 className="text-xl font-semibold">Kondisi Pasar Keseluruhan</h2>
               <p className="text-sm text-zinc-500">
-                Analisis sector performance dan advance/decline ratio
+                Analisa performa per sektor dan rasio saham naik vs turun
               </p>
             </div>
             <Button onClick={analyzeMarket} disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Analyzing...
+                  Menganalisa...
                 </>
               ) : (
                 <>
                   <Activity className="h-4 w-4" />
-                  Run Analysis
+                  Mulai Analisa
                 </>
               )}
             </Button>
@@ -149,11 +164,11 @@ export function MarketBreadthTab() {
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-2xl font-bold">IHSG (^JKSE)</span>
                   <Badge tone={ihsgAnalysis.indicators.trend === "bullish" ? "emerald" : ihsgAnalysis.indicators.trend === "bearish" ? "red" : "amber"}>
-                    {ihsgAnalysis.indicators.trend}
+                    {trendLabels[ihsgAnalysis.indicators.trend] ?? ihsgAnalysis.indicators.trend}
                   </Badge>
                 </div>
                 <div className="mt-2 text-sm text-zinc-400">
-                  Score: {ihsgAnalysis.finalScore} | RSI: {ihsgAnalysis.indicators.rsi.toFixed(1)}
+                  Skor: {ihsgAnalysis.finalScore} | RSI: {ihsgAnalysis.indicators.rsi.toFixed(1)}
                 </div>
               </div>
               <div className="text-right">
@@ -174,7 +189,7 @@ export function MarketBreadthTab() {
             <Card className="border-zinc-800">
               <CardContent className="p-4 text-center">
                 <div className="text-2xl font-bold">{totalStocks}</div>
-                <div className="text-xs text-zinc-500">Total Stocks</div>
+                <div className="text-xs text-zinc-500">Total Saham</div>
               </CardContent>
             </Card>
             <Card className="border-emerald-500/20 bg-emerald-500/10">
@@ -183,7 +198,7 @@ export function MarketBreadthTab() {
                   <ArrowUp className="h-5 w-5" />
                   {totalAdvance}
                 </div>
-                <div className="text-xs text-zinc-500">Advance</div>
+                <div className="text-xs text-zinc-500">Sinyal Beli</div>
               </CardContent>
             </Card>
             <Card className="border-red-500/20 bg-red-500/10">
@@ -192,15 +207,15 @@ export function MarketBreadthTab() {
                   <ArrowDown className="h-5 w-5" />
                   {totalDecline}
                 </div>
-                <div className="text-xs text-zinc-500">Decline</div>
+                <div className="text-xs text-zinc-500">Dilewati</div>
               </CardContent>
             </Card>
             <Card className={`border-${getBreadthTone()}-500/20`}>
               <CardContent className="p-4 text-center">
-                <div className={`text-2xl font-bold text-${getBreadthTone()}-400`}>
+                <div className={`text-2xl font-bold text-${getBreadthTone()}-400`} title="Rasio saham naik dibanding saham turun">
                   {advanceDeclineRatio.toFixed(2)}
                 </div>
-                <div className="text-xs text-zinc-500">A/D Ratio</div>
+                <div className="text-xs text-zinc-500">Rasio Naik/Turun</div>
                 <Badge tone={getBreadthTone()} className="mt-1">
                   {getMarketBreadth()}
                 </Badge>
@@ -210,7 +225,7 @@ export function MarketBreadthTab() {
 
           {/* Sector Breakdown */}
           <div className="space-y-4">
-            <h3 className="font-semibold">Sector Breakdown</h3>
+            <h3 className="font-semibold">Rincian per Sektor</h3>
             {sectors.map((sector) => {
               const sectorAdvance = sector.advanceCount;
               const sectorDecline = sector.declineCount;
@@ -225,8 +240,8 @@ export function MarketBreadthTab() {
                         <span className="font-semibold">{sector.name}</span>
                       </div>
                       <div className="flex items-center gap-4 text-sm">
-                        <span className="text-emerald-400">↑ {sectorAdvance}</span>
-                        <span className="text-red-400">↓ {sectorDecline}</span>
+                        <span className="text-emerald-400" title="Saham dengan sinyal beli">↑ {sectorAdvance}</span>
+                        <span className="text-red-400" title="Saham yang dilewati">↓ {sectorDecline}</span>
                         <Badge tone={sectorRatio >= 1 ? "emerald" : sectorRatio >= 0.5 ? "amber" : "red"}>
                           {sectorRatio.toFixed(2)}
                         </Badge>
@@ -253,7 +268,7 @@ export function MarketBreadthTab() {
                               }
                               className="mt-1 text-xs"
                             >
-                              {analysis.decision.finalDecision}
+                              {decisionLabels[analysis.decision.finalDecision] ?? analysis.decision.finalDecision}
                             </Badge>
                             <div className="mt-1 text-xs text-zinc-500">
                               {analysis.finalScore}
@@ -276,8 +291,8 @@ export function MarketBreadthTab() {
           <CardContent className="flex min-h-[200px] items-center justify-center p-8">
             <div className="text-center text-zinc-500">
               <BarChart3 className="mx-auto h-12 w-12 opacity-30" />
-              <div className="mt-4 font-medium">Belum ada analisis market breadth</div>
-              <div className="mt-2 text-sm">Klik &quot;Run Analysis&quot; untuk memulai</div>
+              <div className="mt-4 font-medium">Belum ada analisa kondisi pasar</div>
+              <div className="mt-2 text-sm">Klik &quot;Mulai Analisa&quot; untuk memulai</div>
             </div>
           </CardContent>
         </Card>

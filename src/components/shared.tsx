@@ -121,11 +121,11 @@ export function AutoFetchBar({
         >
           {loading ? (
             <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Fetching
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Mengambil
             </>
           ) : (
             <>
-              <RefreshCw className="h-3.5 w-3.5" /> Fetch
+              <RefreshCw className="h-3.5 w-3.5" /> Ambil
             </>
           )}
         </Button>
@@ -179,13 +179,13 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   if (upper === "WATCHLIST")
     return (
       <Badge tone="blue">
-        <Activity className="h-3 w-3" /> Watchlist
+        <Activity className="h-3 w-3" /> Pantauan
       </Badge>
     );
   if (upper === "REJECT")
     return (
       <Badge tone="red">
-        <TrendingDown className="h-3 w-3" /> Reject
+        <TrendingDown className="h-3 w-3" /> Dilewati
       </Badge>
     );
   return <Badge tone="neutral">{upper || "—"}</Badge>;
@@ -269,7 +269,7 @@ export function PromptEditor({ value, onChange, onReset }: PromptEditorProps) {
       <CardContent className="p-4">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-            AI Prompt (system)
+            Prompt AI (sistem)
           </span>
           <div className="flex items-center gap-2">
             <Button
@@ -289,7 +289,7 @@ export function PromptEditor({ value, onChange, onReset }: PromptEditorProps) {
               className="text-[11px]"
             >
               <Copy className="h-3 w-3" />
-              {copied ? "Copied" : "Copy"}
+              {copied ? "Tersalin" : "Salin"}
             </Button>
           </div>
         </div>
@@ -318,7 +318,7 @@ export function AIOutputPanel({
   loading,
   error,
   modelLabel,
-  emptyHint = "Klik Generate Analysis untuk dapet output AI.",
+  emptyHint = "Klik tombol Generate untuk dapat output AI.",
   onSave,
   saved,
 }: AIOutputPanelProps) {
@@ -343,9 +343,9 @@ export function AIOutputPanel({
               <Sparkles className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold">AI Analysis</div>
+              <div className="text-sm font-semibold">Analisa AI</div>
               <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                {modelLabel || "ready"}
+                {modelLabel || "siap"}
               </div>
             </div>
           </div>
@@ -358,7 +358,7 @@ export function AIOutputPanel({
                 className="text-[11px]"
               >
                 <Copy className="h-3 w-3" />
-                {copied ? "Copied" : "Copy"}
+                {copied ? "Tersalin" : "Salin"}
               </Button>
             )}
             {output && onSave && (
@@ -369,7 +369,7 @@ export function AIOutputPanel({
                 className="text-[11px]"
               >
                 <Save className="h-3 w-3" />
-                {saved ? "Saved" : "Save Setup"}
+                {saved ? "Tersimpan" : "Simpan Setup"}
               </Button>
             )}
           </div>

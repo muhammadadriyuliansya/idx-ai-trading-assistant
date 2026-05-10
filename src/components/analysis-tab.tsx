@@ -37,6 +37,15 @@ const STORAGE_KEYS = {
   tradeHistory: "idxai.portfolio.history",
 };
 
+// Label Bahasa Indonesia untuk status keputusan yang dipakai UI
+const decisionLabels: Record<string, string> = {
+  BUY_NOW: "Beli Sekarang",
+  WAIT: "Tunggu",
+  WATCHLIST: "Pantauan",
+  REJECT: "Lewati",
+  NO_TRADE: "Tidak Trade",
+};
+
 export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
   const [ticker, setTicker] = useLocalStorage(STORAGE_KEYS.lastTicker, initialTicker || "");
   const [capital, setCapital] = useLocalStorage(STORAGE_KEYS.lastCapital, "10000000");
@@ -76,7 +85,7 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
       const result = await runFullAnalysis(symbol, options);
       setAnalysis(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
+      setError(err instanceof Error ? err.message : "Analisa gagal dijalankan");
     } finally {
       setLoading(false);
     }
@@ -120,7 +129,7 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
               />
             </div>
             <div>
-              <Label className="text-zinc-400">Capital (IDR)</Label>
+              <Label className="text-zinc-400">Modal (Rupiah)</Label>
               <Input
                 type="number"
                 value={capital}
@@ -129,7 +138,7 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
               />
             </div>
             <div>
-              <Label className="text-zinc-400">Risk per Trade (%)</Label>
+              <Label className="text-zinc-400">Risiko per Trade (%)</Label>
               <Input
                 type="number"
                 step="0.1"
@@ -141,8 +150,8 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
             <div>
               <Label className="text-zinc-400">Mode</Label>
               <Select value={mode} onChange={(e) => setMode(e.target.value as TradingMode)}>
-                <option value="swing">Swing</option>
-                <option value="day">Daytrade review</option>
+                <option value="swing">Swing (tahan hari/minggu)</option>
+                <option value="day">Day Trade (review harian)</option>
               </Select>
             </div>
             <div className="flex items-end">
@@ -154,12 +163,12 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Analyzing...
+                    Menganalisa...
                   </>
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4" />
-                    Run Analysis
+                    Mulai Analisa
                   </>
                 )}
               </Button>
@@ -181,9 +190,9 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
           <CardContent className="flex min-h-[300px] items-center justify-center p-8">
             <div className="text-center">
               <Loader2 className="mx-auto h-10 w-10 animate-spin text-blue-400" />
-              <div className="mt-4 text-lg font-semibold">Running v2 Institutional Pipeline</div>
+              <div className="mt-4 text-lg font-semibold">Sedang jalanin pipeline institusi (v2)</div>
               <div className="mt-2 text-sm text-zinc-500">
-                Market data, indicators, analyst reports, thesis, portfolio decision
+                Ambil data pasar, hitung indikator, laporan analis, thesis, keputusan portfolio
               </div>
             </div>
           </CardContent>
@@ -209,18 +218,18 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
                     </span>
                   </div>
                   <Badge className="text-sm" tone={analysis.finalScore >= 70 ? "emerald" : analysis.finalScore >= 50 ? "amber" : "red"}>
-                    Score: {analysis.finalScore}
+                    Skor: {analysis.finalScore}
                   </Badge>
                   <Badge tone={analysis.decision.finalDecision === "BUY_NOW" ? "emerald" : analysis.decision.finalDecision === "WATCHLIST" ? "amber" : "red"}>
-                    {analysis.decision.finalDecision}
+                    {decisionLabels[analysis.decision.finalDecision] ?? analysis.decision.finalDecision}
                   </Badge>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => openTextModal("AI Prompt", exportAIReadyPrompt(analysis))}>
+                  <Button variant="outline" size="sm" onClick={() => openTextModal("Prompt AI", exportAIReadyPrompt(analysis))}>
                     <Brain className="h-4 w-4" />
-                    AI Prompt
+                    Prompt AI
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => openTextModal("Full Brief", exportFullBrief(analysis))}>
+                  <Button variant="outline" size="sm" onClick={() => openTextModal("Laporan Lengkap", exportFullBrief(analysis))}>
                     <Download className="h-4 w-4" />
                     Export
                   </Button>
@@ -243,7 +252,7 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
           <CardContent className="flex min-h-[200px] items-center justify-center p-8">
             <div className="text-center text-zinc-500">
               <Search className="mx-auto h-12 w-12 opacity-30" />
-              <div className="mt-4 font-medium">Masukkan ticker untuk analisis</div>
+              <div className="mt-4 font-medium">Masukkan kode saham untuk dianalisa</div>
               <div className="mt-2 text-sm">
                 Contoh: BBRI, TLKM, GOTO, BMRI
               </div>
@@ -259,7 +268,7 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-semibold text-zinc-100">{modalTitle}</h3>
               <Button variant="ghost" size="sm" onClick={() => setShowModal(false)}>
-                Close
+                Tutup
               </Button>
             </div>
             <textarea
@@ -270,11 +279,11 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
             <div className="flex flex-wrap gap-2">
               <Button className="flex-1" onClick={copyToClipboard}>
                 <Copy className="h-4 w-4" />
-                Copy
+                Salin
               </Button>
               <Button variant="outline" onClick={downloadExport}>
                 <Download className="h-4 w-4" />
-                Download
+                Unduh
               </Button>
             </div>
           </div>

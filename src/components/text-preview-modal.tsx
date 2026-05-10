@@ -40,7 +40,7 @@ export function TextPreviewModal({
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-semibold text-zinc-100">{title}</h3>
           <Button variant="ghost" size="sm" onClick={onClose}>
-            Close
+            Tutup
           </Button>
         </div>
         <textarea
@@ -51,11 +51,11 @@ export function TextPreviewModal({
         <div className="flex flex-wrap gap-2">
           <Button className="flex-1" onClick={handleCopy}>
             <Copy className="h-4 w-4" />
-            Copy
+            Salin
           </Button>
           <Button variant="outline" onClick={handleDownload}>
             <Download className="h-4 w-4" />
-            Download
+            Unduh
           </Button>
         </div>
       </div>
