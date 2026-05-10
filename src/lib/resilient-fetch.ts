@@ -3,7 +3,7 @@ import { createLogger } from "./logger";
 const logger = createLogger("resilient-fetch");
 
 // ============================================================================
-// Circuit Breaker
+// Global storage (survives HMR in dev; single instance per tab in prod)
 // ============================================================================
 
 interface CircuitBreakerState {
@@ -12,9 +12,42 @@ interface CircuitBreakerState {
   state: "closed" | "open" | "half-open";
 }
 
-const circuits = new Map<string, CircuitBreakerState>();
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+interface ResilientGlobals {
+  circuits: Map<string, CircuitBreakerState>;
+  cache: Map<string, CacheEntry<unknown>>;
+  inflight: Map<string, Promise<unknown>>;
+}
+
+const GLOBAL_KEY = "__idxai_resilient_fetch__";
+
+function getGlobals(): ResilientGlobals {
+  const g = globalThis as typeof globalThis & {
+    [GLOBAL_KEY]?: ResilientGlobals;
+  };
+  if (!g[GLOBAL_KEY]) {
+    g[GLOBAL_KEY] = {
+      circuits: new Map(),
+      cache: new Map(),
+      inflight: new Map(),
+    };
+  }
+  return g[GLOBAL_KEY]!;
+}
+
+// ============================================================================
+// Circuit Breaker
+// ============================================================================
+
+const FAILURE_THRESHOLD = 3;
+const RECOVERY_TIMEOUT_MS = 30_000;
 
 function getCircuit(key: string): CircuitBreakerState {
+  const { circuits } = getGlobals();
   let circuit = circuits.get(key);
   if (!circuit) {
     circuit = { failures: 0, lastFailureTime: 0, state: "closed" };
@@ -22,9 +55,6 @@ function getCircuit(key: string): CircuitBreakerState {
   }
   return circuit;
 }
-
-const FAILURE_THRESHOLD = 3;
-const RECOVERY_TIMEOUT_MS = 30_000;
 
 function recordFailure(key: string): void {
   const circuit = getCircuit(key);
@@ -52,34 +82,34 @@ function isCircuitOpen(key: string): boolean {
     }
     return true;
   }
-  // half-open: allow one request
   return false;
 }
 
 // ============================================================================
-// Stale Cache (client-side)
+// Cache
 // ============================================================================
 
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-}
-
-const clientCache = new Map<string, CacheEntry<unknown>>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 2 * 60 * 1000; // 2 min fresh (matches server bars TTL)
 
 function getCached<T>(key: string): T | null {
-  const entry = clientCache.get(key) as CacheEntry<T> | undefined;
+  const { cache } = getGlobals();
+  const entry = cache.get(key) as CacheEntry<T> | undefined;
   if (!entry) return null;
   if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    clientCache.delete(key);
     return null;
   }
   return entry.data;
 }
 
+function getStaleCached<T>(key: string): T | null {
+  const { cache } = getGlobals();
+  const entry = cache.get(key) as CacheEntry<T> | undefined;
+  return entry ? entry.data : null;
+}
+
 function setCache<T>(key: string, data: T): void {
-  clientCache.set(key, { data, timestamp: Date.now() });
+  const { cache } = getGlobals();
+  cache.set(key, { data, timestamp: Date.now() });
 }
 
 // ============================================================================
@@ -117,92 +147,109 @@ export async function resilientFetch<T>(
 ): Promise<T> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const cacheKey = opts.cacheKey || url;
+  const { inflight } = getGlobals();
 
-  // Check circuit breaker
-  if (opts.useCircuitBreaker && isCircuitOpen(cacheKey)) {
-    logger.warn(`Circuit open for ${cacheKey}, returning cached data`);
-    const cached = getCached<T>(cacheKey);
-    if (cached) return cached;
-    throw new Error(`Circuit breaker open for ${cacheKey} and no cached data available`);
-  }
-
-  // Check cache
+  // 1. Fresh cache hit
   if (opts.useCache) {
     const cached = getCached<T>(cacheKey);
-    if (cached) {
+    if (cached !== null) {
       logger.debug(`Cache hit for ${cacheKey}`);
       return cached;
     }
   }
 
-  let lastError: Error | null = null;
+  // 2. Circuit open → try stale cache, else fail
+  if (opts.useCircuitBreaker && isCircuitOpen(cacheKey)) {
+    logger.warn(`Circuit open for ${cacheKey}, attempting stale cache`);
+    const stale = getStaleCached<T>(cacheKey);
+    if (stale !== null) return stale;
+    throw new Error(
+      `Circuit breaker open for ${cacheKey} and no cached data available`,
+    );
+  }
 
-  for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs);
+  // 3. In-flight dedup — multiple callers share one network request
+  const existing = inflight.get(cacheKey) as Promise<T> | undefined;
+  if (existing) {
+    logger.debug(`In-flight dedup for ${cacheKey}`);
+    return existing;
+  }
 
-      const response = await fetch(url, {
-        ...fetchOptions,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+  const promise = (async (): Promise<T> => {
+    let lastError: Error | null = null;
 
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown error");
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
+    for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs);
 
-      const data = (await response.json()) as T;
+        const response = await fetch(url, {
+          ...fetchOptions,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-      // Success
-      if (opts.useCircuitBreaker) recordSuccess(cacheKey);
-      if (opts.useCache) setCache(cacheKey, data);
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "Unknown error");
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
 
-      return data;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+        const data = (await response.json()) as T;
 
-      // Don't retry on abort (timeout)
-      if (lastError.name === "AbortError") {
-        lastError = new Error(`Request timed out after ${opts.timeoutMs}ms`);
-      }
+        if (opts.useCircuitBreaker) recordSuccess(cacheKey);
+        if (opts.useCache) setCache(cacheKey, data);
 
-      logger.warn(`Fetch attempt ${attempt + 1}/${opts.maxRetries + 1} failed for ${url}`, {
-        error: lastError.message,
-      });
+        return data;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
 
-      if (attempt < opts.maxRetries) {
-        const delay = Math.min(
-          opts.baseDelayMs * Math.pow(2, attempt) + Math.random() * 100,
-          opts.maxDelayMs,
+        if (lastError.name === "AbortError") {
+          lastError = new Error(`Request timed out after ${opts.timeoutMs}ms`);
+        }
+
+        logger.warn(
+          `Fetch attempt ${attempt + 1}/${opts.maxRetries + 1} failed for ${url}`,
+          { error: lastError.message },
         );
-        await sleep(delay);
+
+        if (attempt < opts.maxRetries) {
+          const delay = Math.min(
+            opts.baseDelayMs * Math.pow(2, attempt) + Math.random() * 100,
+            opts.maxDelayMs,
+          );
+          await sleep(delay);
+        }
       }
     }
+
+    if (opts.useCircuitBreaker) recordFailure(cacheKey);
+
+    const stale = getStaleCached<T>(cacheKey);
+    if (stale !== null) {
+      logger.warn(`All retries failed for ${url}, returning stale cache`);
+      return stale;
+    }
+
+    throw lastError ?? new Error(`Fetch failed for ${url}`);
+  })();
+
+  inflight.set(cacheKey, promise);
+  try {
+    return await promise;
+  } finally {
+    inflight.delete(cacheKey);
   }
-
-  // All retries failed
-  if (opts.useCircuitBreaker) recordFailure(cacheKey);
-
-  // Try returning stale cache as fallback
-  const staleCache = getCached<T>(cacheKey);
-  if (staleCache) {
-    logger.warn(`All retries failed for ${url}, returning stale cache`);
-    return staleCache;
-  }
-
-  throw lastError ?? new Error(`Fetch failed for ${url}`);
 }
 
 // ============================================================================
-// Exported for testing
+// Exported for testing / admin
 // ============================================================================
 
 export function resetCircuits(): void {
-  circuits.clear();
+  getGlobals().circuits.clear();
 }
 
 export function resetClientCache(): void {
-  clientCache.clear();
+  getGlobals().cache.clear();
+  getGlobals().inflight.clear();
 }

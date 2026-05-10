@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GET } from "@/app/api/news/route";
+import { clearAllCache } from "@/lib/server-cache";
 import type { NextRequest } from "next/server";
 
 vi.mock("@/lib/logger", () => ({
@@ -16,6 +17,8 @@ describe("GET /api/news", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Clear the cross-request server cache so tests are isolated.
+    clearAllCache();
     mockFetch = vi.fn();
     global.fetch = mockFetch as unknown as typeof fetch;
   });

@@ -49,7 +49,7 @@ import { MultiTimeframeTab } from "@/components/timeframe-tab";
 import { ComparisonTab } from "@/components/comparison-tab";
 import { MarketBreadthTab } from "@/components/market-breadth-tab";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { STORAGE_KEYS, SCAN_CONFIG } from "@/config/app";
+import { STORAGE_KEYS, SCAN_CONFIG, AUTO_SCAN_THROTTLE_MS } from "@/config/app";
 import { actionTone, candidateTone, healthTone } from "@/features/trading/display";
 import {
   buildImprovementText,
@@ -133,6 +133,10 @@ export default function HomePage() {
     STORAGE_KEYS.tradeHistory,
     [],
   );
+  const [lastScanAt, setLastScanAt] = useLocalStorage<number>(
+    STORAGE_KEYS.lastScanAt,
+    0,
+  );
 
   const defaultTickerCount = useMemo(() => getDefaultIDXTickers().length, []);
   const currentAiOpinion = analysis
@@ -191,21 +195,33 @@ export default function HomePage() {
       setScanResults(results);
       setWatchlist((prev) => mergeWatchlist(prev, results));
       setAlerts((prev) => evaluateAlerts(prev, results));
-      setScanCompletedAt(Date.now());
+      const now = Date.now();
+      setScanCompletedAt(now);
+      setLastScanAt(now);
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "Market scan failed");
     } finally {
       setScanLoading(false);
     }
-  }, [scanMode, setAlerts, setWatchlist]);
+  }, [scanMode, setAlerts, setLastScanAt, setWatchlist]);
 
+  // Auto-scan on mount — throttled so reloading the tab every few seconds
+  // doesn't hammer Yahoo Finance. If the last scan is still within the TTL
+  // window, skip. Manual refresh button always runs regardless.
   useEffect(() => {
+    if (scanResults.length > 0) return;
+    const elapsed = Date.now() - (lastScanAt ?? 0);
+    if (elapsed < AUTO_SCAN_THROTTLE_MS) return;
+
     const timer = window.setTimeout(() => {
       void runScan();
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [runScan]);
+    // runScan changes when scanMode changes; lastScanAt only gates the initial
+    // trigger. We intentionally leave lastScanAt out of deps to avoid loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runScan, scanResults.length]);
 
   const analyzeTicker = async (selectedTicker?: string) => {
     const nextTicker = (selectedTicker ?? ticker).trim().toUpperCase();

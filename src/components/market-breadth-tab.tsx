@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { runFullAnalysis } from "@/pipeline/orchestrator";
 import type { AnalysisPipeline } from "@/pipeline/types";
+import { mapWithConcurrency } from "@/lib/concurrency";
 
 interface SectorData {
   name: string;
@@ -39,40 +40,46 @@ export function MarketBreadthTab() {
 
   const analyzeMarket = async () => {
     setLoading(true);
-    
+
     try {
-      // Analyze IHSG
+      // Analyze IHSG first (its data will also warm the server cache)
       const ihsg = await runFullAnalysis("^JKSE", { capital: 10000000, riskPerTrade: 1 });
       setIhsgAnalysis(ihsg);
 
-      // Analyze each sector
-      const sectorResults: SectorData[] = [];
-      
-      for (const sector of IDX_SECTORS) {
-        const analysisMap = new Map<string, AnalysisPipeline>();
-        let advance = 0;
-        let decline = 0;
+      // Analyze each sector's tickers with bounded concurrency — previously
+      // this ran purely sequentially (5 tickers x 5 sectors = 25 sync calls).
+      const sectorResults: SectorData[] = await Promise.all(
+        IDX_SECTORS.map(async (sector) => {
+          const analysisMap = new Map<string, AnalysisPipeline>();
+          let advance = 0;
+          let decline = 0;
 
-        for (const ticker of sector.tickers) {
-          try {
-            const analysis = await runFullAnalysis(ticker, { capital: 10000000, riskPerTrade: 1 });
-            analysisMap.set(ticker, analysis);
-            
-            if (analysis.decision.finalDecision === "BUY_NOW") advance++;
-            else if (analysis.decision.finalDecision === "REJECT") decline++;
-          } catch {
-            // Skip failed tickers
-          }
-        }
+          const settled = await mapWithConcurrency(
+            sector.tickers,
+            4,
+            (ticker) =>
+              runFullAnalysis(ticker, { capital: 10000000, riskPerTrade: 1 }),
+          );
 
-        sectorResults.push({
-          name: sector.name,
-          tickers: sector.tickers,
-          analysis: analysisMap,
-          advanceCount: advance,
-          declineCount: decline,
-        });
-      }
+          sector.tickers.forEach((ticker, i) => {
+            const result = settled[i];
+            if (result.status === "fulfilled") {
+              const analysis = result.value;
+              analysisMap.set(ticker, analysis);
+              if (analysis.decision.finalDecision === "BUY_NOW") advance++;
+              else if (analysis.decision.finalDecision === "REJECT") decline++;
+            }
+          });
+
+          return {
+            name: sector.name,
+            tickers: sector.tickers,
+            analysis: analysisMap,
+            advanceCount: advance,
+            declineCount: decline,
+          };
+        }),
+      );
 
       setSectors(sectorResults);
     } catch (err) {

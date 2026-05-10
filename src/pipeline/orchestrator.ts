@@ -100,7 +100,7 @@ export async function runFullAnalysis(
     // LAYER 1: Market Data
     // ============================================================
     const { marketData, indicators, fundamental, dataHealth, ihsgTrend, ihsgChange5d, ihsgChange1d } =
-      await fetchMarketDataWithIndicators(ticker)
+      await fetchMarketDataWithIndicators(ticker, { fields: 'full' })
 
     // ============================================================
     // LAYER 1b: Hard Filters (legacy compatibility)

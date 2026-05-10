@@ -21,7 +21,30 @@ export interface MarketDataWithIndicators {
   ihsgChange1d?: number
 }
 
-export async function fetchMarketData(ticker: string): Promise<MarketData> {
+export interface FetchMarketDataOptions {
+  /**
+   * "bars" skips IHSG + fundamental on the server for faster scanner passes.
+   * "full" pulls everything (used by full analysis pipeline).
+   * Default: "full".
+   */
+  fields?: 'bars' | 'full'
+}
+
+function buildQuoteUrl(symbol: string, fields: 'bars' | 'full'): string {
+  const params = new URLSearchParams({ ticker: symbol })
+  if (fields !== 'full') params.set('fields', fields)
+  return `/api/quote?${params.toString()}`
+}
+
+function buildCacheKey(symbol: string, fields: 'bars' | 'full'): string {
+  return `quote:${fields}:${symbol}`
+}
+
+export async function fetchMarketData(
+  ticker: string,
+  options: FetchMarketDataOptions = {},
+): Promise<MarketData> {
+  const fields = options.fields ?? 'full'
   const normalisedTicker = ticker.trim().toUpperCase()
   const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
@@ -31,9 +54,9 @@ export async function fetchMarketData(ticker: string): Promise<MarketData> {
     risk: Record<string, string>
     error?: string
   }>(
-    `/api/quote?ticker=${encodeURIComponent(symbol)}`,
+    buildQuoteUrl(symbol, fields),
     { cache: 'no-store' },
-    { cacheKey: `quote:${symbol}`, useCircuitBreaker: true, useCache: true },
+    { cacheKey: buildCacheKey(symbol, fields), useCircuitBreaker: true, useCache: true },
   )
 
   if (data.error) {
@@ -56,14 +79,18 @@ export async function fetchMarketData(ticker: string): Promise<MarketData> {
   }
 }
 
-export async function fetchMarketDataWithIndicators(ticker: string): Promise<MarketDataWithIndicators> {
+export async function fetchMarketDataWithIndicators(
+  ticker: string,
+  options: FetchMarketDataOptions = {},
+): Promise<MarketDataWithIndicators> {
+  const fields = options.fields ?? 'full'
   const normalisedTicker = ticker.trim().toUpperCase()
   const symbol = normalisedTicker.includes('.') ? normalisedTicker : `${normalisedTicker}.JK`
 
   const data = await resilientFetch<Record<string, unknown>>(
-    `/api/quote?ticker=${encodeURIComponent(symbol)}`,
+    buildQuoteUrl(symbol, fields),
     { cache: 'no-store' },
-    { cacheKey: `quote:${symbol}`, useCircuitBreaker: true, useCache: true },
+    { cacheKey: buildCacheKey(symbol, fields), useCircuitBreaker: true, useCache: true },
   )
 
   if (data.error) {
@@ -112,6 +139,7 @@ export async function fetchMarketDataWithIndicators(ticker: string): Promise<Mar
   logger.info(`Market data fetched for ${ticker}`, {
     bars: meta.barsCount,
     trend: meta.trend,
+    fields,
   })
 
   return {

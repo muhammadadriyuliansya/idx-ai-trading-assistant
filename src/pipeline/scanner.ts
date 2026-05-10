@@ -7,9 +7,15 @@ import type { ScanCandidate, ScanOptions, MarketData, IndicatorSet } from './typ
 import { applyHardFilters, DEFAULT_FILTERS } from './filters'
 import { calculateRiskReward } from '@/lib/calc'
 import { fetchMarketDataWithIndicators } from './orchestrator'
+import { mapWithConcurrency } from '@/lib/concurrency'
 
 /**
- * Run automated market scan on multiple tickers
+ * Run automated market scan on multiple tickers.
+ *
+ * The scanner only needs bars + derived indicators, so it hits the quote
+ * endpoint in "bars" mode — that skips IHSG + fundamentals per ticker and
+ * lets the server cache dedup parallel callers. Concurrency 8 is a
+ * balance between throughput and Yahoo rate limits.
  */
 export async function runMarketScan(
   options: ScanOptions
@@ -26,28 +32,24 @@ export async function runMarketScan(
   const candidates: ScanCandidate[] = []
   const errors: Map<string, string> = new Map()
 
-  // Process tickers in parallel batches
-  const batchSize = 5
-  for (let i = 0; i < tickers.length; i += batchSize) {
-    const batch = tickers.slice(i, i + batchSize)
+  const settled = await mapWithConcurrency(tickers, 8, async (ticker) => {
+    try {
+      return await scanTicker(
+        ticker,
+        mode,
+        minVolumeRatio ?? getModeDefaults(mode).minVolumeRatio,
+        minRR ?? getModeDefaults(mode).minRR,
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      errors.set(ticker, message)
+      return null
+    }
+  })
 
-    const batchResults = await Promise.allSettled(
-      batch.map(async (ticker) => {
-        try {
-          return await scanTicker(ticker, mode, minVolumeRatio ?? getModeDefaults(mode).minVolumeRatio, minRR ?? getModeDefaults(mode).minRR)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unknown error'
-          errors.set(ticker, message)
-          return null
-        }
-      })
-    )
-
-    // Collect successful results
-    for (const result of batchResults) {
-      if (result.status === 'fulfilled' && result.value) {
-        candidates.push(result.value)
-      }
+  for (const result of settled) {
+    if (result.status === 'fulfilled' && result.value) {
+      candidates.push(result.value)
     }
   }
 
@@ -88,8 +90,12 @@ async function scanTicker(
   minVolumeRatio: number,
   minRR: number
 ): Promise<ScanCandidate | null> {
-  // Fetch market data and indicators
-  const { marketData, indicators, dataHealth } = await fetchMarketDataWithIndicators(ticker)
+  // Fetch market data + indicators in "bars" mode — IHSG and fundamental
+  // are not needed for scanning and would multiply Yahoo Finance calls.
+  const { marketData, indicators, dataHealth } = await fetchMarketDataWithIndicators(
+    ticker,
+    { fields: 'bars' },
+  )
 
   // Apply hard filters as classification, not as a data gate. The scanner
   // should still show the best available market candidates even on weak days.
