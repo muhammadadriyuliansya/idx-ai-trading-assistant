@@ -1,4 +1,4 @@
-export type Provider = "openai" | "anthropic" | "ollama";
+export type Provider = "openai" | "anthropic" | "ollama" | "custom";
 
 /**
  * Per-feature toggles for optional AI augmentation layers. All default OFF
@@ -29,6 +29,9 @@ export interface AISettings {
   ollamaModel: string;
   /** Override default http://localhost:11434. Empty string = use default. */
   ollamaBaseUrl: string;
+  customKey: string;
+  customModel: string;
+  customBaseUrl: string;
   features: AIFeatureFlags;
 }
 

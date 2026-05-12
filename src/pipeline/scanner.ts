@@ -66,8 +66,12 @@ export async function runMarketScan(
   const filtered = candidates.filter((c) => c.setupScore >= minSetupScore)
   const resultPool = filtered.length > 0 ? filtered : candidates
 
-  // Sort by setup quality first, then by tradability metrics.
+  // Sort: bullish → sideways → bearish, then by setup quality.
+  const trendRank: Record<string, number> = { bullish: 0, sideways: 1, bearish: 2 }
   const sorted = resultPool.sort((a, b) => {
+    const trendDiff = (trendRank[a.trend] ?? 1) - (trendRank[b.trend] ?? 1)
+    if (trendDiff !== 0) return trendDiff
+
     const scoreDiff = b.setupScore - a.setupScore
     if (scoreDiff !== 0) return scoreDiff
 
@@ -153,7 +157,9 @@ async function scanTicker(
 }
 
 /**
- * Calculate setup score from market data and indicators
+ * Calculate setup score from market data and indicators.
+ * Enhanced with scalping patterns: anti-gravity, VWAP authority,
+ * gap continuation, and volume+price quality.
  */
 function calculateSetupScoreFromData(
   marketData: MarketData,
@@ -168,36 +174,84 @@ function calculateSetupScoreFromData(
     rrQuality: 0,
   }
 
-  // Trend score
-  if (marketData.currentPrice > indicators.ema20) breakdown.trend += 10
-  if (indicators.ema20 > indicators.ema50) breakdown.trend += 10
-  if (indicators.ema50 > indicators.ema200) breakdown.trend += 7
+  // ==========================================================================
+  // Trend score (max 30) — includes anti-gravity detection
+  // ==========================================================================
+  const isGreenCandle = marketData.currentPrice > marketData.open
+  const isNearHigh = marketData.currentPrice >= marketData.high * 0.92
+  const isGapUp = marketData.open > marketData.previousClose
+  const isGapHold = isGapUp && isGreenCandle
+
+  // Core EMA alignment
+  if (marketData.currentPrice > indicators.ema20) breakdown.trend += 8
+  if (indicators.ema20 > indicators.ema50) breakdown.trend += 8
+  if (indicators.ema50 > indicators.ema200) breakdown.trend += 5
   if (marketData.currentPrice > indicators.vwap) breakdown.trend += 3
-  if (mode === 'day' && marketData.currentPrice > indicators.vwap) breakdown.trend += 5
+
+  // Anti-gravity: green candle + near high + gap hold
+  if (isGreenCandle) breakdown.trend += 3
+  if (isNearHigh && isGreenCandle) breakdown.trend += 3
+  if (isGapHold) breakdown.trend += 3
+  if (mode === 'day' && marketData.currentPrice > indicators.vwap) breakdown.trend += 3
+  if (mode === 'premarket') breakdown.trend += isGapHold ? 5 : 3
   if (mode === 'swing' && indicators.trend !== 'bearish') breakdown.trend += 5
 
-  // Momentum score (max 20)
-  if (indicators.rsi >= 50 && indicators.rsi <= 70) breakdown.momentum += 12
-  else if (indicators.rsi > 70 && indicators.rsi <= 80) breakdown.momentum += 6
-  else if (indicators.rsi >= 40 && indicators.rsi < 50) breakdown.momentum += 6
-  if (mode === 'day' && indicators.rsi >= 45 && indicators.rsi <= 68) breakdown.momentum += 5
-  if (mode === 'swing' && indicators.rsi >= 40 && indicators.rsi <= 65) breakdown.momentum += 5
+  // ==========================================================================
+  // Momentum score (max 20) — refined RSI zones + VWAP proximity
+  // ==========================================================================
+  const dayRange = marketData.high - marketData.low
+  const priceFromLow = marketData.currentPrice - marketData.low
+  const rangePosition = dayRange > 0 ? priceFromLow / dayRange : 0.5
 
-  if (indicators.macd.label.includes('bull')) breakdown.momentum += 8
-  else if (indicators.macd.label.includes('netral')) breakdown.momentum += 3
+  // RSI sweet spots for continuation
+  if (indicators.rsi >= 55 && indicators.rsi <= 70) breakdown.momentum += 10
+  else if (indicators.rsi >= 50 && indicators.rsi < 55) breakdown.momentum += 7
+  else if (indicators.rsi > 70 && indicators.rsi <= 80) breakdown.momentum += 5
+  else if (indicators.rsi >= 45 && indicators.rsi < 50) breakdown.momentum += 4
 
-  // Volume score (max 20)
+  // Price in upper 40% of day range = strength
+  if (rangePosition >= 0.6) breakdown.momentum += 3
+
+  // VWAP proximity bonus for day mode (pullback to VWAP while above = scalp entry)
+  if (mode === 'day' && marketData.currentPrice > indicators.vwap) {
+    const vwapDistance = (marketData.currentPrice - indicators.vwap) / marketData.currentPrice
+    if (vwapDistance < 0.005) breakdown.momentum += 5  // within 0.5% of VWAP = bounce entry
+    else if (vwapDistance < 0.015) breakdown.momentum += 3  // riding above VWAP
+  }
+
+  if (indicators.macd.label.includes('bull')) breakdown.momentum += 5
+  else if (indicators.macd.label.includes('netral')) breakdown.momentum += 2
+
+  // ==========================================================================
+  // Volume score (max 20) — volume + price correlation
+  // ==========================================================================
   const idealVolume = mode === 'day' ? 1.2 : mode === 'swing' ? 1 : 1.5
-  if (indicators.volumeRatio >= 2) breakdown.volume += 20
-  else if (indicators.volumeRatio >= idealVolume) breakdown.volume += 15
-  else if (indicators.volumeRatio >= 0.5) breakdown.volume += mode === 'conservative' ? 4 : 9
+  if (indicators.volumeRatio >= 2.5 && isGreenCandle) breakdown.volume += 20  // massive accumulation
+  else if (indicators.volumeRatio >= 2) breakdown.volume += 16
+  else if (indicators.volumeRatio >= idealVolume && isGreenCandle) breakdown.volume += 14  // healthy volume + green
+  else if (indicators.volumeRatio >= idealVolume) breakdown.volume += 11
+  else if (indicators.volumeRatio >= 0.5) breakdown.volume += mode === 'conservative' ? 4 : 8
   else breakdown.volume += 2
 
-  // Context score (max 20) - simplified
-  if (indicators.trend === 'bullish') breakdown.context += 7
+  // ==========================================================================
+  // Context score (max 20) — gap analysis + trend quality
+  // ==========================================================================
+  if (indicators.trend === 'bullish') breakdown.context += 6
   else if (indicators.trend === 'sideways') breakdown.context += 3
 
+  // Gap continuation: green candle after gap up = strong momentum
+  if (isGapHold) breakdown.context += 5
+  else if (isGapUp && !isGreenCandle) breakdown.context += 2  // gap up but faded = neutral
+
+  // Reversal: gap down but turned green
+  if (marketData.open < marketData.previousClose && isGreenCandle) breakdown.context += 4
+
+  // Price firmly in upper half of range
+  if (rangePosition >= 0.5) breakdown.context += 3
+
+  // ==========================================================================
   // RR quality (max 10)
+  // ==========================================================================
   const rr = calculateRiskReward(
     marketData.currentPrice,
     marketData.support,
@@ -234,6 +288,16 @@ function getModeDefaults(mode: ScanCandidate['mode']) {
     }
   }
 
+  if (mode === 'premarket') {
+    return {
+      minVolumeRatio: 0.3,
+      minRR: 1.2,
+      minAvgVolume: 500000,
+      minPriceRange: 0.01,
+      requireBullishTrend: false,
+    }
+  }
+
   return {
     minVolumeRatio: DEFAULT_FILTERS.minVolumeRatio!,
     minRR: DEFAULT_FILTERS.minRR!,
@@ -252,9 +316,10 @@ function buildCandidateReason(
   mode: ScanCandidate['mode'],
 ): string {
   if (filterReason) return filterReason
-  if (status === 'VALID') return `${mode.toUpperCase()} setup valid: score ${setupScore}/100, RR ${rr.toFixed(2)}, volume ${indicators.volumeRatio.toFixed(2)}x.`
-  if (status === 'WATCHLIST') return `${mode.toUpperCase()} watchlist: score ${setupScore}/100, trend ${indicators.trend}, RR ${rr.toFixed(2)}.`
-  return `Weak ${mode} setup: score ${setupScore}/100, trend ${indicators.trend}, RR ${rr.toFixed(2)}.`
+  const modeLabel = mode === 'premarket' ? 'PREMARKET' : mode.toUpperCase()
+  if (status === 'VALID') return `${modeLabel} setup valid: score ${setupScore}/100, RR ${rr.toFixed(2)}, volume ${indicators.volumeRatio.toFixed(2)}x.`
+  if (status === 'WATCHLIST') return `${modeLabel} watchlist: score ${setupScore}/100, trend ${indicators.trend}, RR ${rr.toFixed(2)}.`
+  return `Weak ${modeLabel} setup: score ${setupScore}/100, trend ${indicators.trend}, RR ${rr.toFixed(2)}.`
 }
 
 function buildNextTrigger(
@@ -263,10 +328,11 @@ function buildNextTrigger(
   rr: number,
   mode: ScanCandidate['mode'],
 ): string {
-  const minRr = mode === 'day' ? 2 : mode === 'swing' ? 1.5 : 2
-  const minVolume = mode === 'day' ? 1.5 : mode === 'swing' ? 1 : 1.5
+  const minRr = mode === 'day' ? 2 : mode === 'swing' ? 1.5 : mode === 'premarket' ? 1.2 : 2
+  const minVolume = mode === 'day' ? 1.5 : mode === 'swing' ? 1 : mode === 'premarket' ? 0.5 : 1.5
   if (rr < minRr) return `Wait for price closer to support ${marketData.support.toFixed(0)} or resistance expansion.`
   if (indicators.volumeRatio < minVolume) return `Wait for volume ratio above ${minVolume.toFixed(1)}x.`
+  if (mode === 'premarket') return `Pantau saat pre-market. Fokus gap ${marketData.open > marketData.previousClose ? 'up' : 'down'} dan level support/resistance.`
   if (mode === 'day') return `Review only until intraday feed, spread, and VWAP confirmation are available.`
   if (indicators.trend !== 'bullish') return `Wait for close above EMA20 ${indicators.ema20.toFixed(0)}.`
   return `Break or hold above resistance ${marketData.resistance.toFixed(0)} with volume.`

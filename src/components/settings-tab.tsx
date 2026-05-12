@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { useLocalStorage } from "@/lib/storage";
 import { STORAGE_KEYS, DEFAULT_AI_SETTINGS } from "@/config/app";
 import type { AIFeatureFlags, AISettings, Provider } from "@/lib/types";
+import { Wrench } from "lucide-react";
 
 interface HealthResponse {
   ok: boolean;
@@ -53,6 +54,12 @@ const providerOptions: {
     label: "Anthropic (Cloud)",
     icon: <Cloud className="h-4 w-4" />,
     description: "Claude via API. Kualitas setara GPT, butuh API key.",
+  },
+  {
+    id: "custom",
+    label: "Custom (OpenAI-compat)",
+    icon: <Wrench className="h-4 w-4" />,
+    description: "OpenAI-compatible endpoint kustom. Isi base URL, API key, dan model manual.",
   },
 ];
 
@@ -353,6 +360,46 @@ export function SettingsTab() {
         </Card>
       )}
 
+      {settings.provider === "custom" && (
+        <Card className="border-zinc-800">
+          <CardContent className="space-y-4 p-4">
+            <h3 className="font-semibold">Konfigurasi Custom</h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Base URL</Label>
+                <Input
+                  value={settings.customBaseUrl ?? ""}
+                  onChange={(e) => updateSetting("customBaseUrl", e.target.value)}
+                  placeholder="http://localhost:20128/v1"
+                  className="font-mono"
+                />
+                <p className="mt-1 text-[10px] text-zinc-500">
+                  URL endpoint OpenAI-compatible, termasuk <code>/v1</code>.
+                </p>
+              </div>
+              <div>
+                <Label>API Key</Label>
+                <Input
+                  value={settings.customKey ?? ""}
+                  onChange={(e) => updateSetting("customKey", e.target.value)}
+                  placeholder="sk-..."
+                  className="font-mono"
+                />
+              </div>
+              <div>
+                <Label>Model</Label>
+                <Input
+                  value={settings.customModel ?? ""}
+                  onChange={(e) => updateSetting("customModel", e.target.value)}
+                  placeholder="opencode/deepseek-v4-flash-free"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Connection test */}
       <Card className="border-zinc-800">
         <CardContent className="space-y-3 p-4">
@@ -362,6 +409,8 @@ export function SettingsTab() {
               <p className="text-xs text-zinc-500">
                 {settings.provider === "ollama"
                   ? "Cek apakah Ollama running dan model terinstal."
+                  : settings.provider === "custom"
+                  ? "Verifikasi endpoint kustom. Key & URL baru dicek saat request pertama."
                   : "Verifikasi nama provider. Key baru dicek saat request pertama."}
               </p>
             </div>

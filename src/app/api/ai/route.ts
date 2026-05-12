@@ -18,7 +18,7 @@ interface AIRequestBody {
 }
 
 function isValidProvider(value: unknown): value is AIProvider {
-  return value === "openai" || value === "anthropic" || value === "ollama";
+  return value === "openai" || value === "anthropic" || value === "ollama" || value === "custom";
 }
 
 function isValidBody(body: unknown): body is AIRequestBody {
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   }
 
   // Cloud providers need an API key; Ollama runs local and doesn't.
-  if ((body.provider === "openai" || body.provider === "anthropic") && !body.apiKey) {
+  if ((body.provider === "openai" || body.provider === "anthropic" || body.provider === "custom") && !body.apiKey) {
     return NextResponse.json(
       { error: "API key belum di-isi. Set di menu Settings dulu." },
       { status: 400 },

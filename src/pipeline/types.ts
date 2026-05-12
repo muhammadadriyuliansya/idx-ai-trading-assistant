@@ -309,7 +309,7 @@ export interface AnalysisPipeline {
 
 export interface ScanCandidate {
   ticker: string
-  mode: 'conservative' | 'swing' | 'day'
+  mode: 'conservative' | 'swing' | 'day' | 'premarket'
   setupScore: number
   scoreBreakdown: {
     trend: number
@@ -338,7 +338,7 @@ export interface ScanCandidate {
 
 export interface ScanOptions {
   tickers: string[]
-  mode?: 'conservative' | 'swing' | 'day'
+  mode?: 'conservative' | 'swing' | 'day' | 'premarket'
   minVolumeRatio?: number
   minRR?: number
   minSetupScore?: number

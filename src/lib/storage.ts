@@ -14,8 +14,16 @@ export function useLocalStorage<T>(
     try {
       const raw = window.localStorage.getItem(key);
       if (raw !== null) {
+        const parsed = JSON.parse(raw) as T;
+        // Merge with defaults for objects so new fields never end up undefined
+        const merged =
+          typeof initialValue === "object" &&
+          initialValue !== null &&
+          !Array.isArray(initialValue)
+            ? { ...initialValue, ...parsed }
+            : parsed;
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        setStored(JSON.parse(raw) as T);
+        setStored(merged as T);
       }
     } catch {
       // ignore parse errors

@@ -13,7 +13,7 @@ import { createLogger } from "./logger";
 
 const logger = createLogger("ai-provider");
 
-export type AIProvider = "openai" | "anthropic" | "ollama";
+export type AIProvider = "openai" | "anthropic" | "ollama" | "custom";
 
 export interface CallAIOptions {
   provider: AIProvider;
@@ -47,7 +47,7 @@ const DEFAULT_TIMEOUT_LOCAL = 90_000;
 
 function resolveTimeout(opts: CallAIOptions): number {
   if (opts.timeoutMs) return opts.timeoutMs;
-  return opts.provider === "ollama" ? DEFAULT_TIMEOUT_LOCAL : DEFAULT_TIMEOUT_CLOUD;
+  return opts.provider === "ollama" || opts.provider === "custom" ? DEFAULT_TIMEOUT_LOCAL : DEFAULT_TIMEOUT_CLOUD;
 }
 
 /**
@@ -108,10 +108,20 @@ async function callOpenAI(opts: CallAIOptions): Promise<string> {
       signal,
     });
 
-    const data = (await res.json()) as {
+    const raw = await res.text();
+
+    let data: {
       choices?: { message?: { content?: string } }[];
       error?: { message?: string };
     };
+    try {
+      const jsonStart = raw.indexOf("{");
+      const jsonEnd = raw.lastIndexOf("}");
+      const clean = jsonStart !== -1 && jsonEnd !== -1 ? raw.slice(jsonStart, jsonEnd + 1) : raw;
+      data = JSON.parse(clean) as typeof data;
+    } catch {
+      throw new Error(`Response OpenAI bukan JSON valid: ${raw.slice(0, 500)}`);
+    }
 
     if (!res.ok) {
       throw new Error(data?.error?.message || `OpenAI HTTP ${res.status}`);
@@ -234,6 +244,88 @@ async function callOllama(opts: CallAIOptions): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Custom (OpenAI-compatible)
+// ---------------------------------------------------------------------------
+
+async function callCustom(opts: CallAIOptions): Promise<string> {
+  if (!opts.apiKey) throw new Error("Custom API key kosong");
+  if (!opts.baseUrl) throw new Error("Custom base URL kosong");
+
+  const timeoutMs = resolveTimeout(opts);
+  const { signal, cleanup } = mergeSignals(opts.signal, timeoutMs);
+
+  try {
+    const body: Record<string, unknown> = {
+      model: opts.model,
+      temperature: opts.temperature ?? 0.4,
+      max_tokens: opts.maxTokens ?? 1500,
+      messages: [
+        { role: "system", content: opts.system },
+        { role: "user", content: opts.user },
+      ],
+    };
+    if (opts.format === "json") {
+      body.response_format = { type: "json_object" };
+    }
+
+    const baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${opts.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    // Baca sebagai text dulu — beberapa proxy balikin trailing data setelah JSON
+    const raw = await res.text();
+
+    let data: {
+      choices?: { message?: { content?: string; reasoning_content?: string } }[];
+      error?: { message?: string };
+    };
+    try {
+      const jsonStart = raw.indexOf("{");
+      const jsonEnd = raw.lastIndexOf("}");
+      const clean = jsonStart !== -1 && jsonEnd !== -1 ? raw.slice(jsonStart, jsonEnd + 1) : raw;
+      data = JSON.parse(clean) as typeof data;
+    } catch {
+      throw new Error(`Response bukan JSON valid: ${raw.slice(0, 500)}`);
+    }
+
+    if (!res.ok) {
+      throw new Error(data?.error?.message || `Custom API HTTP ${res.status}`);
+    }
+
+    const msg = data?.choices?.[0]?.message;
+    const text = msg?.content || msg?.reasoning_content || "";
+    if (!text) {
+      const preview = JSON.stringify(data).slice(0, 500);
+      throw new Error(`Custom API returned empty response. Response structure: ${preview}`);
+    }
+
+    // Bersihin pola thinking headers (contoh: "1. **Analyze the Request:** ...")
+    // Model DeepSeek sering output planning structure di reasoning_content
+    // Cari bagian pertama yang kelihatan kayak konten akhir (dimulai tanpa numbering)
+    const lines = text.split("\n").filter(Boolean);
+    let cleanText = text;
+    if (/^\d+\.\s/.test(lines[0] ?? "")) {
+      // Skip numbering headers, cari konten yang bener
+      const contentStart = lines.findIndex((l) => !/^\d+\.\s/.test(l));
+      cleanText = contentStart > 0 ? lines.slice(contentStart).join("\n") : text;
+    }
+    // Hapus baris yang purely planning: "1. **Analyze the Request:**" etc
+    cleanText = cleanText.replace(/^\d+\.\s+\*{1,2}.*?\*{1,2}.*$/gm, "").trim();
+
+    return cleanText || text;
+  } finally {
+    cleanup();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -250,6 +342,9 @@ export async function callAI(opts: CallAIOptions): Promise<CallAIResult> {
       break;
     case "ollama":
       text = await callOllama(opts);
+      break;
+    case "custom":
+      text = await callCustom(opts);
       break;
     default: {
       const exhaustive: never = opts.provider;

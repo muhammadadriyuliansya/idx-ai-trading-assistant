@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ScanCandidate } from "@/pipeline/types";
 
-type ScanMode = 'conservative' | 'swing' | 'day';
+type ScanMode = 'conservative' | 'swing' | 'day' | 'premarket';
 import { formatCurrency } from "@/lib/utils";
 import { useLocalStorage } from "@/lib/storage";
 import { STORAGE_KEYS, DEFAULT_AI_SETTINGS } from "@/config/app";
@@ -56,6 +56,7 @@ const statusLabels: Record<ScanCandidate["status"], string> = {
 const modeLabels: Record<ScanMode, string> = {
   swing: "Swing (harian)",
   day: "Day Trade",
+  premarket: "Pre-market",
   conservative: "Konservatif",
 };
 
@@ -195,7 +196,7 @@ export function ScannerTab({
         <div className="flex flex-wrap items-center gap-3">
           {/* Mode Selector */}
           <div className="flex items-center gap-1 rounded-lg bg-zinc-900/50 p-1">
-            {(["swing", "day", "conservative"] as ScanMode[]).map((mode) => (
+            {(["swing", "day", "premarket", "conservative"] as ScanMode[]).map((mode) => (
               <Button
                 key={mode}
                 variant={scanMode === mode ? "default" : "ghost"}

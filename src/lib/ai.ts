@@ -51,6 +51,13 @@ export async function generateAnalysis(
     if (!model) {
       throw new Error("Model Ollama belum di-set. Buka Settings dan isi nama model.");
     }
+  } else if (provider === "custom") {
+    apiKey = req.settings.customKey.trim();
+    model = req.settings.customModel;
+    baseUrl = req.settings.customBaseUrl.trim() || undefined;
+    if (!apiKey) throw new Error("Custom API key belum di-set.");
+    if (!model) throw new Error("Custom model belum di-set.");
+    if (!baseUrl) throw new Error("Custom base URL belum di-set.");
   } else {
     const exhaustive: never = provider;
     throw new Error(`Provider tidak dikenal: ${String(exhaustive)}`);

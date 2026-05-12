@@ -36,14 +36,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, provider, baseUrl, models });
   }
 
-  if (provider === "openai" || provider === "anthropic") {
+  if (provider === "openai" || provider === "anthropic" || provider === "custom") {
     // Cloud providers: we can't validate without spending tokens, so just
     // confirm the provider name is known. Key validity is tested on first call.
-    return NextResponse.json({
-      ok: true,
-      provider,
-      note: "Cloud provider, koneksi nyata dicek saat request pertama.",
-    });
+    const note = provider === "custom"
+      ? "Custom endpoint, koneksi nyata dicek saat request pertama."
+      : "Cloud provider, koneksi nyata dicek saat request pertama.";
+    return NextResponse.json({ ok: true, provider, note });
   }
 
   return NextResponse.json({ ok: false, error: `Provider tidak dikenal: ${provider}` }, { status: 400 });

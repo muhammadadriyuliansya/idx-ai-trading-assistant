@@ -38,6 +38,9 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   anthropicModel: "claude-3-5-haiku-latest",
   ollamaModel: "gemma4:e4b",
   ollamaBaseUrl: "",
+  customKey: "",
+  customModel: "opencode/deepseek-v4-flash-free",
+  customBaseUrl: "http://localhost:20128/v1",
   features: {
     scannerCritique: false,
     newsSummary: false,

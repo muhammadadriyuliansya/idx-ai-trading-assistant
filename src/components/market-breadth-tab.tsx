@@ -9,29 +9,33 @@ import {
   ArrowUp,
   ArrowDown,
   Layers,
+  TrendingUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { runFullAnalysis } from "@/pipeline/orchestrator";
-import type { AnalysisPipeline } from "@/pipeline/types";
-import { mapWithConcurrency } from "@/lib/concurrency";
+import { runMarketScan, getDefaultIDXTickers } from "@/pipeline/scanner";
+import type { ScanCandidate } from "@/pipeline/types";
 
 interface SectorData {
   name: string;
   tickers: string[];
-  analysis: Map<string, AnalysisPipeline>;
-  advanceCount: number;
-  declineCount: number;
+  results: Map<string, ScanCandidate>;
+  validCount: number;
+  watchCount: number;
+  rejectCount: number;
 }
 
-// Label Bahasa Indonesia
-const decisionLabels: Record<string, string> = {
-  BUY_NOW: "Beli Sekarang",
-  WAIT: "Tunggu",
-  WATCHLIST: "Pantauan",
+const statusTone: Record<string, "emerald" | "amber" | "red"> = {
+  VALID: "emerald",
+  WATCHLIST: "amber",
+  REJECT: "red",
+};
+
+const statusLabels: Record<string, string> = {
+  VALID: "Beli",
+  WATCHLIST: "Pantau",
   REJECT: "Lewati",
-  NO_TRADE: "Tidak Trade",
 };
 
 const trendLabels: Record<string, string> = {
@@ -41,90 +45,91 @@ const trendLabels: Record<string, string> = {
 };
 
 const IDX_SECTORS = [
-  { name: "Keuangan", tickers: ["BBRI", "BMRI", "BDMN", "BNGA", "BTN"] },
+  { name: "Keuangan", tickers: ["BBRI", "BMRI", "BBCA", "BBNI", "BTPS"] },
   { name: "Infrastruktur", tickers: ["TLKM", "EXCL", "ISAT", "FREN"] },
-  { name: "Konsumer", tickers: ["UNVR", "ICBP", "INDF", "KLBF", "WIIM"] },
-  { name: "Tambang", tickers: ["ANTM", "INCO", "PTBA", "TINS"] },
-  { name: "Properti", tickers: ["BSDE", "PWON", "CTRA", "LAND"] },
+  { name: "Konsumer", tickers: ["UNVR", "ICBP", "INDF", "GGRM", "HMSP"] },
+  { name: "Tambang", tickers: ["ANTM", "ADRO", "PTBA", "ITMG", "TINS"] },
+  { name: "Properti", tickers: ["BSDE", "PWON", "CTRA", "LPKR", "ASRI"] },
 ];
 
 export function MarketBreadthTab() {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [sectors, setSectors] = useState<SectorData[]>([]);
-  const [ihsgAnalysis, setIhsgAnalysis] = useState<AnalysisPipeline | null>(null);
 
   const analyzeMarket = async () => {
     setLoading(true);
+    setError(null);
 
     try {
-      // Analyze IHSG first (its data will also warm the server cache)
-      const ihsg = await runFullAnalysis("^JKSE", { capital: 10000000, riskPerTrade: 1 });
-      setIhsgAnalysis(ihsg);
+      const results = await runMarketScan({
+        tickers: getDefaultIDXTickers(),
+        mode: "swing",
+        maxResults: 40,
+      });
 
-      // Analyze each sector's tickers with bounded concurrency — previously
-      // this ran purely sequentially (5 tickers x 5 sectors = 25 sync calls).
-      const sectorResults: SectorData[] = await Promise.all(
-        IDX_SECTORS.map(async (sector) => {
-          const analysisMap = new Map<string, AnalysisPipeline>();
-          let advance = 0;
-          let decline = 0;
+      const resultMap = new Map<string, ScanCandidate>();
+      for (const r of results) {
+        resultMap.set(r.ticker.replace(".JK", ""), r);
+      }
 
-          const settled = await mapWithConcurrency(
-            sector.tickers,
-            4,
-            (ticker) =>
-              runFullAnalysis(ticker, { capital: 10000000, riskPerTrade: 1 }),
-          );
+      const sectorResults: SectorData[] = IDX_SECTORS.map((sector) => {
+        let valid = 0;
+        let watch = 0;
+        let reject = 0;
+        const sectorMap = new Map<string, ScanCandidate>();
 
-          sector.tickers.forEach((ticker, i) => {
-            const result = settled[i];
-            if (result.status === "fulfilled") {
-              const analysis = result.value;
-              analysisMap.set(ticker, analysis);
-              if (analysis.decision.finalDecision === "BUY_NOW") advance++;
-              else if (analysis.decision.finalDecision === "REJECT") decline++;
-            }
-          });
+        for (const t of sector.tickers) {
+          const r = resultMap.get(t);
+          if (!r) continue;
+          sectorMap.set(t, r);
+          if (r.status === "VALID") valid++;
+          else if (r.status === "WATCHLIST") watch++;
+          else reject++;
+        }
 
-          return {
-            name: sector.name,
-            tickers: sector.tickers,
-            analysis: analysisMap,
-            advanceCount: advance,
-            declineCount: decline,
-          };
-        }),
-      );
+        return {
+          name: sector.name,
+          tickers: sector.tickers,
+          results: sectorMap,
+          validCount: valid,
+          watchCount: watch,
+          rejectCount: reject,
+        };
+      });
 
       setSectors(sectorResults);
     } catch (err) {
-      console.error("Market breadth analysis failed:", err);
+      setError(err instanceof Error ? err.message : "Gagal scan pasar");
     } finally {
       setLoading(false);
     }
   };
 
   // Calculate market breadth
-  const totalStocks = sectors.reduce((sum, s) => sum + s.analysis.size, 0);
-  const totalAdvance = sectors.reduce((sum, s) => sum + s.advanceCount, 0);
-  const totalDecline = sectors.reduce((sum, s) => sum + s.declineCount, 0);
-  const advanceDeclineRatio = totalDecline > 0 ? totalAdvance / totalDecline : totalAdvance;
+  const totalValid = sectors.reduce((sum, s) => sum + s.validCount, 0);
+  const totalWatch = sectors.reduce((sum, s) => sum + s.watchCount, 0);
+  const totalReject = sectors.reduce((sum, s) => sum + s.rejectCount, 0);
+  const totalStocks = totalValid + totalWatch + totalReject;
+  const validRatio = totalStocks > 0 ? totalValid / totalStocks : 0;
+  const rejectRatio = totalStocks > 0 ? totalReject / totalStocks : 0;
 
   const getMarketBreadth = (): string => {
-    if (totalAdvance > totalDecline * 1.5) return "Sangat Bullish";
-    if (totalAdvance > totalDecline) return "Bullish";
-    if (totalDecline > totalAdvance * 1.5) return "Sangat Bearish";
-    if (totalDecline > totalAdvance) return "Bearish";
+    if (validRatio >= 0.3) return "Kondisi Beli";
+    if (validRatio >= 0.15) return "Selektif";
+    if (rejectRatio >= 0.7) return "Hindari";
     return "Netral";
   };
 
   const getBreadthTone = (): "emerald" | "blue" | "amber" | "red" => {
-    const ratio = advanceDeclineRatio;
-    if (ratio >= 1.5) return "emerald";
-    if (ratio >= 1) return "blue";
-    if (ratio >= 0.5) return "amber";
-    return "red";
+    if (validRatio >= 0.3) return "emerald";
+    if (validRatio >= 0.15) return "blue";
+    if (rejectRatio >= 0.7) return "red";
+    return "amber";
   };
+
+  const breadthLabel = getMarketBreadth();
+  const breadthTone = getBreadthTone();
 
   return (
     <div className="space-y-6">
@@ -135,52 +140,35 @@ export function MarketBreadthTab() {
             <div>
               <h2 className="text-xl font-semibold">Kondisi Pasar Keseluruhan</h2>
               <p className="text-sm text-zinc-500">
-                Analisa performa per sektor dan rasio saham naik vs turun
+                Hasil scan {totalStocks || "semua"} saham IDX — lihat distribusi kandidat per sektor
               </p>
             </div>
-            <Button onClick={analyzeMarket} disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Menganalisa...
-                </>
-              ) : (
-                <>
-                  <Activity className="h-4 w-4" />
-                  Mulai Analisa
-                </>
+            <div className="flex items-center gap-2">
+              {sectors.length > 0 && (
+                <Badge tone={breadthTone}>{breadthLabel}</Badge>
               )}
-            </Button>
+              <Button onClick={analyzeMarket} disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Scanning...
+                  </>
+                ) : (
+                  <>
+                    <Activity className="h-4 w-4" />
+                    Scan Pasar
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
+          {error && (
+            <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {error}
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* IHSG Overview */}
-      {ihsgAnalysis && (
-        <Card className="border-blue-500/30 bg-blue-500/10">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-2xl font-bold">IHSG (^JKSE)</span>
-                  <Badge tone={ihsgAnalysis.indicators.trend === "bullish" ? "emerald" : ihsgAnalysis.indicators.trend === "bearish" ? "red" : "amber"}>
-                    {trendLabels[ihsgAnalysis.indicators.trend] ?? ihsgAnalysis.indicators.trend}
-                  </Badge>
-                </div>
-                <div className="mt-2 text-sm text-zinc-400">
-                  Skor: {ihsgAnalysis.finalScore} | RSI: {ihsgAnalysis.indicators.rsi.toFixed(1)}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-zinc-500">Volume</div>
-                <div className="font-mono text-lg">
-                  {ihsgAnalysis.indicators.volumeRatio.toFixed(2)}x
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Breadth Summary */}
       {sectors.length > 0 && (
@@ -189,36 +177,37 @@ export function MarketBreadthTab() {
             <Card className="border-zinc-800">
               <CardContent className="p-4 text-center">
                 <div className="text-2xl font-bold">{totalStocks}</div>
-                <div className="text-xs text-zinc-500">Total Saham</div>
+                <div className="text-xs text-zinc-500">Terdeteksi</div>
               </CardContent>
             </Card>
             <Card className="border-emerald-500/20 bg-emerald-500/10">
               <CardContent className="p-4 text-center">
                 <div className="flex items-center justify-center gap-1 text-2xl font-bold text-emerald-400">
-                  <ArrowUp className="h-5 w-5" />
-                  {totalAdvance}
+                  <TrendingUp className="h-5 w-5" />
+                  {totalValid}
                 </div>
-                <div className="text-xs text-zinc-500">Sinyal Beli</div>
+                <div className="text-xs text-zinc-500">Siap Beli</div>
+                <div className="mt-0.5 text-[10px] text-zinc-500">{(validRatio * 100).toFixed(0)}% dari total</div>
+              </CardContent>
+            </Card>
+            <Card className="border-amber-500/20 bg-amber-500/10">
+              <CardContent className="p-4 text-center">
+                <div className="flex items-center justify-center gap-1 text-2xl font-bold text-amber-400">
+                  <Activity className="h-5 w-5" />
+                  {totalWatch}
+                </div>
+                <div className="text-xs text-zinc-500">Pantauan</div>
+                <div className="mt-0.5 text-[10px] text-zinc-500">{totalStocks > 0 ? ((totalWatch / totalStocks) * 100).toFixed(0) : 0}% dari total</div>
               </CardContent>
             </Card>
             <Card className="border-red-500/20 bg-red-500/10">
               <CardContent className="p-4 text-center">
                 <div className="flex items-center justify-center gap-1 text-2xl font-bold text-red-400">
-                  <ArrowDown className="h-5 w-5" />
-                  {totalDecline}
+                  <BarChart3 className="h-5 w-5" />
+                  {totalReject}
                 </div>
                 <div className="text-xs text-zinc-500">Dilewati</div>
-              </CardContent>
-            </Card>
-            <Card className={`border-${getBreadthTone()}-500/20`}>
-              <CardContent className="p-4 text-center">
-                <div className={`text-2xl font-bold text-${getBreadthTone()}-400`} title="Rasio saham naik dibanding saham turun">
-                  {advanceDeclineRatio.toFixed(2)}
-                </div>
-                <div className="text-xs text-zinc-500">Rasio Naik/Turun</div>
-                <Badge tone={getBreadthTone()} className="mt-1">
-                  {getMarketBreadth()}
-                </Badge>
+                <div className="mt-0.5 text-[10px] text-zinc-500">{(rejectRatio * 100).toFixed(0)}% dari total</div>
               </CardContent>
             </Card>
           </div>
@@ -227,9 +216,8 @@ export function MarketBreadthTab() {
           <div className="space-y-4">
             <h3 className="font-semibold">Rincian per Sektor</h3>
             {sectors.map((sector) => {
-              const sectorAdvance = sector.advanceCount;
-              const sectorDecline = sector.declineCount;
-              const sectorRatio = sectorDecline > 0 ? sectorAdvance / sectorDecline : sectorAdvance;
+              const sTotal = sector.validCount + sector.watchCount + sector.rejectCount;
+              const sValidRatio = sTotal > 0 ? (sector.validCount / sTotal) * 100 : 0;
 
               return (
                 <Card key={sector.name} className="border-zinc-800">
@@ -238,20 +226,21 @@ export function MarketBreadthTab() {
                       <div className="flex items-center gap-2">
                         <Layers className="h-5 w-5 text-blue-400" />
                         <span className="font-semibold">{sector.name}</span>
+                        <span className="text-xs text-zinc-500">({sTotal})</span>
                       </div>
-                      <div className="flex items-center gap-4 text-sm">
-                        <span className="text-emerald-400" title="Saham dengan sinyal beli">↑ {sectorAdvance}</span>
-                        <span className="text-red-400" title="Saham yang dilewati">↓ {sectorDecline}</span>
-                        <Badge tone={sectorRatio >= 1 ? "emerald" : sectorRatio >= 0.5 ? "amber" : "red"}>
-                          {sectorRatio.toFixed(2)}
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="text-emerald-400">{sector.validCount} beli</span>
+                        <span className="text-amber-400">{sector.watchCount} pantau</span>
+                        <span className="text-red-400">{sector.rejectCount} lewat</span>
+                        <Badge tone={sValidRatio >= 20 ? "emerald" : sValidRatio >= 10 ? "amber" : "red"}>
+                          {sValidRatio.toFixed(0)}%
                         </Badge>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                       {sector.tickers.map((ticker) => {
-                        const analysis = sector.analysis.get(ticker);
-                        if (!analysis) return null;
+                        const result = sector.results.get(ticker);
 
                         return (
                           <motion.div
@@ -261,18 +250,16 @@ export function MarketBreadthTab() {
                             className="rounded bg-zinc-900/50 p-2 text-center"
                           >
                             <div className="font-mono text-sm font-bold">{ticker}</div>
-                            <Badge 
-                              tone={
-                                analysis.decision.finalDecision === "BUY_NOW" ? "emerald" :
-                                analysis.decision.finalDecision === "WATCHLIST" ? "amber" : "red"
-                              }
-                              className="mt-1 text-xs"
-                            >
-                              {decisionLabels[analysis.decision.finalDecision] ?? analysis.decision.finalDecision}
-                            </Badge>
-                            <div className="mt-1 text-xs text-zinc-500">
-                              {analysis.finalScore}
-                            </div>
+                            {result ? (
+                              <>
+                                <Badge tone={statusTone[result.status] ?? "red"} className="mt-1 text-xs">
+                                  {statusLabels[result.status] ?? result.status}
+                                </Badge>
+                                <div className="mt-1 text-xs text-zinc-500">{result.setupScore}</div>
+                              </>
+                            ) : (
+                              <div className="mt-1 text-[10px] text-zinc-600">N/A</div>
+                            )}
                           </motion.div>
                         );
                       })}
@@ -291,8 +278,8 @@ export function MarketBreadthTab() {
           <CardContent className="flex min-h-[200px] items-center justify-center p-8">
             <div className="text-center text-zinc-500">
               <BarChart3 className="mx-auto h-12 w-12 opacity-30" />
-              <div className="mt-4 font-medium">Belum ada analisa kondisi pasar</div>
-              <div className="mt-2 text-sm">Klik &quot;Mulai Analisa&quot; untuk memulai</div>
+              <div className="mt-4 font-medium">Belum ada data kondisi pasar</div>
+              <div className="mt-2 text-sm">Klik &quot;Scan Pasar&quot; untuk melihat distribusi kandidat</div>
             </div>
           </CardContent>
         </Card>
