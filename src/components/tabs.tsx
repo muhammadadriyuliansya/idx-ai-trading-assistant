@@ -7,11 +7,13 @@ import {
   ScanLine,
   GitCompare,
   Layers,
+  Briefcase,
+  Sun,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type TabId = "scanner" | "analysis" | "comparison" | "timeframe" | "breadth" | "settings";
+export type TabId = "brief" | "scanner" | "analysis" | "positions" | "comparison" | "timeframe" | "breadth" | "settings";
 
 export interface TabItem {
   id: TabId;
@@ -20,8 +22,10 @@ export interface TabItem {
 }
 
 export const TABS: TabItem[] = [
+  { id: "brief", label: "Brief", icon: <Sun className="h-4 w-4" /> },
   { id: "scanner", label: "Scanner", icon: <Search className="h-4 w-4" /> },
   { id: "analysis", label: "Analisis", icon: <BarChart3 className="h-4 w-4" /> },
+  { id: "positions", label: "Posisi", icon: <Briefcase className="h-4 w-4" /> },
   { id: "comparison", label: "Bandingkan", icon: <GitCompare className="h-4 w-4" /> },
   { id: "timeframe", label: "Multi Timeframe", icon: <ScanLine className="h-4 w-4" /> },
   { id: "breadth", label: "Kondisi Market", icon: <Layers className="h-4 w-4" /> },

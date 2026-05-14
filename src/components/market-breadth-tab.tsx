@@ -6,8 +6,6 @@ import {
   Activity,
   BarChart3,
   Loader2,
-  ArrowUp,
-  ArrowDown,
   Layers,
   TrendingUp,
 } from "lucide-react";
@@ -36,12 +34,6 @@ const statusLabels: Record<string, string> = {
   VALID: "Beli",
   WATCHLIST: "Pantau",
   REJECT: "Lewati",
-};
-
-const trendLabels: Record<string, string> = {
-  bullish: "Naik",
-  bearish: "Turun",
-  sideways: "Mendatar",
 };
 
 const IDX_SECTORS = [

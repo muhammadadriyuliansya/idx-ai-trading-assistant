@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ScanCandidate } from "@/pipeline/types";
+import { BacktestBadge } from "@/components/backtest-badge";
 
 type ScanMode = 'conservative' | 'swing' | 'day' | 'premarket';
 import { formatCurrency } from "@/lib/utils";
@@ -374,6 +375,11 @@ export function ScannerTab({
                       <span className="text-zinc-300">
                         {candidate.reason.slice(0, 50)}...
                       </span>
+                    </div>
+
+                    {/* Inline backtest — history pattern yang sama di ticker ini */}
+                    <div className="mt-2">
+                      <BacktestBadge ticker={candidate.ticker} variant="compact" />
                     </div>
 
                     {/* AI Critique (opsional) */}

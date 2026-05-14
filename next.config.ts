@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  // Allow HMR from 127.0.0.1 (Next.js 16 blocks it by default since
+  // it's technically a different origin from localhost).
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
+
   // yahoo-finance2 is a big Node-only dep with dynamic imports.
   // Mark it external so Next doesn't try to bundle it into the server output,
   // which both speeds up build and avoids runtime resolution issues.

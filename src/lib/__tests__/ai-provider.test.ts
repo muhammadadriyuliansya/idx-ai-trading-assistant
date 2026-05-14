@@ -40,7 +40,8 @@ describe("ai-provider", () => {
     it("sends chat completion request and returns text", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ choices: [{ message: { content: "hi" } }] }),
+        text: async () =>
+          JSON.stringify({ choices: [{ message: { content: "hi" } }] }),
       });
 
       const result = await callAI({
@@ -64,7 +65,8 @@ describe("ai-provider", () => {
     it("adds response_format when format is json", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ choices: [{ message: { content: "{}" } }] }),
+        text: async () =>
+          JSON.stringify({ choices: [{ message: { content: "{}" } }] }),
       });
 
       await callAI({

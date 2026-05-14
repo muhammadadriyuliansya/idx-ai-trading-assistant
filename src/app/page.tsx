@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
-  AlertTriangle,
   BarChart3,
   Bell,
   Brain,
@@ -14,12 +13,9 @@ import {
   Download,
   Eye,
   Loader2,
-  RefreshCw,
-  Search,
   Shield,
   Sparkles,
   Target,
-  TrendingUp,
   Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { FormattedNumberInput } from "@/components/formatted-input";
 import { PipelineViewer } from "@/components/pipeline-viewer";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -44,6 +39,8 @@ import type { AnalysisPipeline, ScanCandidate } from "@/pipeline/types";
 import { TabNavigation, type TabId } from "@/components/tabs";
 import { ScannerTab } from "@/components/scanner-tab";
 import { AnalysisTab } from "@/components/analysis-tab";
+import { PositionTrackerTab } from "@/components/position-tracker-tab";
+import { MorningBriefTab } from "@/components/morning-brief-tab";
 import { TextPreviewModal } from "@/components/text-preview-modal";
 import { MultiTimeframeTab } from "@/components/timeframe-tab";
 import { ComparisonTab } from "@/components/comparison-tab";
@@ -67,10 +64,9 @@ import {
   ExplainRow,
   MetricChip,
   StatusRow,
-  TinyScore,
 } from "@/features/trading/dashboard-components";
-import { evaluateAlerts, getAlertLabel, mergeWatchlist } from "@/features/trading/watchlist";
-import type { AiOpinion, AlertCondition, LocalAlert, ScanMode, WatchlistItem } from "@/features/trading/types";
+import { evaluateAlerts, mergeWatchlist } from "@/features/trading/watchlist";
+import type { AiOpinion, LocalAlert, ScanMode, WatchlistItem } from "@/features/trading/types";
 import type { AISettings } from "@/lib/types";
 import { callAIIfEnabled } from "@/lib/ai-client";
 import { SectorHeatmap } from "@/components/sector-heatmap";
@@ -104,7 +100,7 @@ const actionLabels: Record<string, string> = {
 };
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<TabId>("scanner");
+  const [activeTab, setActiveTab] = useState<TabId>("brief");
   const [ticker, setTicker] = useLocalStorage(STORAGE_KEYS.lastTicker, "");
   const [capital, setCapital] = useLocalStorage(
     STORAGE_KEYS.lastCapital,
@@ -251,6 +247,7 @@ export default function HomePage() {
     if (scanResults.length === 0) {
       const elapsed = Date.now() - (lastScanAt ?? 0);
       if (elapsed >= AUTO_SCAN_THROTTLE_MS) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         void runScan();
       }
     }
@@ -268,6 +265,7 @@ export default function HomePage() {
 
   // Keyboard shortcuts
   const runScanRef = useRef(runScan);
+  // eslint-disable-next-line react-hooks/refs
   runScanRef.current = runScan;
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -287,7 +285,11 @@ export default function HomePage() {
 
   // Live mode timer indicator
   useEffect(() => {
-    if (!liveMode) { setNextAutoRefresh(null); return; }
+    if (!liveMode) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNextAutoRefresh(null);
+      return;
+    }
     setNextAutoRefresh(Date.now() + 120000);
     const tick = setInterval(() => {
       setNextAutoRefresh((prev) => prev ? prev - 1000 : null);
@@ -339,23 +341,6 @@ export default function HomePage() {
     setModalDownloadName(
       `${title.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}.txt`,
     );
-  };
-
-  const addAlert = (candidate: ScanCandidate, condition: AlertCondition) => {
-    const id = `${candidate.ticker}-${condition}`;
-    setAlerts((prev) => {
-      if (prev.some((item) => item.id === id)) return prev;
-      return [
-        {
-          id,
-          ticker: candidate.ticker,
-          condition,
-          targetLabel: getAlertLabel(candidate, condition),
-          createdAt: Date.now(),
-        },
-        ...prev,
-      ].slice(0, 40);
-    });
   };
 
   const saveAiOpinion = () => {
@@ -420,6 +405,7 @@ export default function HomePage() {
           <div className="flex items-center gap-2">
             {nextAutoRefresh !== null && (
               <span className="text-[10px] text-zinc-500 tabular-nums">
+                {/* eslint-disable-next-line react-hooks/purity */}
                 {Math.max(0, Math.floor((nextAutoRefresh - Date.now()) / 1000))}s
               </span>
             )}
@@ -450,6 +436,15 @@ export default function HomePage() {
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">
         {/* Tab Content */}
+        {activeTab === "brief" && (
+          <MorningBriefTab
+            onJumpToTicker={(t) => {
+              setTicker(t);
+              setActiveTab("analysis");
+            }}
+          />
+        )}
+
         {activeTab === "scanner" && (
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
             <div>
@@ -646,6 +641,10 @@ export default function HomePage() {
 
         {activeTab === "analysis" && (
           <AnalysisTab initialTicker={ticker} />
+        )}
+
+        {activeTab === "positions" && (
+          <PositionTrackerTab />
         )}
 
         {activeTab === "comparison" && (

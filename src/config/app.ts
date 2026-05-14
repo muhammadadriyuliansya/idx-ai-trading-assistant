@@ -1,4 +1,6 @@
 import type { AISettings } from "@/lib/types";
+import type { TradingPersona } from "@/features/trading/position-types";
+import { DEFAULT_TRADING_PERSONA } from "@/features/trading/position-types";
 
 export const STORAGE_KEYS = {
   lastTicker: "idxai.last.ticker",
@@ -11,6 +13,10 @@ export const STORAGE_KEYS = {
   tradeHistory: "idxai.portfolio.history",
   lastScanAt: "idxai.scan.lastAt",
   aiSettings: "idxai.ai.settings",
+  persona: "idxai.persona",
+  openPositions: "idxai.positions.open",
+  closedTrades: "idxai.positions.closed",
+  telegramConfig: "idxai.telegram.config",
 } as const;
 
 export const SCAN_CONFIG = {
@@ -26,11 +32,12 @@ export const SCAN_CONFIG = {
 export const AUTO_SCAN_THROTTLE_MS = 2 * 60 * 1000;
 
 /**
- * Default AI settings. All features start OFF — user opts in per-feature
- * from the Settings tab. Keeps the upgrade non-intrusive for existing users.
+ * Default AI settings — dikonfigurasi untuk persona user:
+ * provider custom (9router localhost:20128) + model DeepSeek V4 flash free.
+ * AI master switch tetap OFF supaya user opt-in sadar.
  */
 export const DEFAULT_AI_SETTINGS: AISettings = {
-  provider: "ollama",
+  provider: "custom",
   aiEnabled: false,
   openaiKey: "",
   anthropicKey: "",
@@ -49,3 +56,9 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
     structuredOutput: false,
   },
 };
+
+/**
+ * Default persona — swing/day/scalp trader modal 1.5jt, target 1-2%.
+ * Fee config IDX retail umum. User boleh override di Settings.
+ */
+export const DEFAULT_PERSONA: TradingPersona = DEFAULT_TRADING_PERSONA;

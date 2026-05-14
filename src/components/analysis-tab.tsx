@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { PipelineViewer } from "@/components/pipeline-viewer";
+import { BacktestBadge } from "@/components/backtest-badge";
 import { useLocalStorage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/utils";
 import { exportAIReadyPrompt, exportFullBrief } from "@/lib/export";
@@ -234,6 +235,11 @@ export function AnalysisTab({ initialTicker }: AnalysisTabProps) {
                     Export
                   </Button>
                 </div>
+              </div>
+
+              {/* Inline backtest — track record setup di ticker ini */}
+              <div className="mt-3">
+                <BacktestBadge ticker={analysis.ticker} variant="detailed" />
               </div>
             </CardContent>
           </Card>
